@@ -7,10 +7,10 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(MozillaRustComponents)
-    import MozillaRustComponents
+import MozillaRustComponents
 #endif
 
-private extension RustBuffer {
+fileprivate extension RustBuffer {
     // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
@@ -26,12 +26,11 @@ private extension RustBuffer {
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
 }
-
 // For every type used in the interface, we provide helper methods for conveniently
 // lifting and lowering that type from C-compatible data, and for reading and writing
 // values of that type in a buffer.
@@ -39,7 +38,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a libray of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         // TODO: This copies the buffer. Can we read directly from a
         // Rust buffer?
@@ -48,20 +47,20 @@ private extension Data {
 }
 
 // A helper class to read values out of a byte buffer.
-private class Reader {
+fileprivate class Reader {
     let data: Data
     var offset: Data.Index
 
     init(data: Data) {
         self.data = data
-        offset = 0
+        self.offset = 0
     }
 
     // Reads an integer at the current offset, in big-endian order, and advances
     // the offset on success. Throws if reading the integer would move the
     // offset past the end of the buffer.
     func readInt<T: FixedWidthInteger>() throws -> T {
-        let range = offset ..< offset + MemoryLayout<T>.size
+        let range = offset..<offset + MemoryLayout<T>.size
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
@@ -71,22 +70,22 @@ private class Reader {
             return value as! T
         }
         var value: T = 0
-        _ = withUnsafeMutableBytes(of: &value) { data.copyBytes(to: $0, from: range) }
+        let _ = withUnsafeMutableBytes(of: &value, { data.copyBytes(to: $0, from: range)})
         offset = range.upperBound
         return value.bigEndian
     }
 
     // Reads an arbitrary number of bytes, to be used to read
     // raw bytes, this is useful when lifting strings
-    func readBytes(count: Int) throws -> [UInt8] {
-        let range = offset ..< (offset + count)
+    func readBytes(count: Int) throws -> Array<UInt8> {
+        let range = offset..<(offset+count)
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
         var value = [UInt8](repeating: 0, count: count)
-        value.withUnsafeMutableBufferPointer { buffer in
+        value.withUnsafeMutableBufferPointer({ buffer in
             data.copyBytes(to: buffer, from: range)
-        }
+        })
         offset = range.upperBound
         return value
     }
@@ -111,13 +110,13 @@ private class Reader {
 }
 
 // A helper class to write values into a byte buffer.
-private class Writer {
+fileprivate class Writer {
     var bytes: [UInt8]
     var offset: Array<UInt8>.Index
 
     init() {
-        bytes = []
-        offset = 0
+        self.bytes = []
+        self.offset = 0
     }
 
     func writeBytes<S>(_ byteArr: S) where S: Sequence, S.Element == UInt8 {
@@ -144,56 +143,57 @@ private class Writer {
     }
 }
 
+
 // Types conforming to `Serializable` can be read and written in a bytebuffer.
-private protocol Serializable {
+fileprivate protocol Serializable {
     func write(into: Writer)
     static func read(from: Reader) throws -> Self
 }
 
 // Types confirming to `ViaFfi` can be transferred back-and-for over the FFI.
 // This is analogous to the Rust trait of the same name.
-private protocol ViaFfi: Serializable {
+fileprivate protocol ViaFfi: Serializable {
     associatedtype FfiType
     static func lift(_ v: FfiType) throws -> Self
     func lower() -> FfiType
 }
 
 // Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol Primitive {}
+fileprivate protocol Primitive {}
 
-private extension Primitive {
-    typealias FfiType = Self
+extension Primitive {
+    fileprivate typealias FfiType = Self
 
-    static func lift(_ v: Self) throws -> Self {
+    fileprivate static func lift(_ v: Self) throws -> Self {
         return v
     }
 
-    func lower() -> Self {
+    fileprivate func lower() -> Self {
         return self
     }
 }
 
 // Types conforming to `ViaFfiUsingByteBuffer` lift and lower into a bytebuffer.
 // Use this for complex types where it's hard to write a custom lift/lower.
-private protocol ViaFfiUsingByteBuffer: Serializable {}
+fileprivate protocol ViaFfiUsingByteBuffer: Serializable {}
 
-private extension ViaFfiUsingByteBuffer {
-    typealias FfiType = RustBuffer
+extension ViaFfiUsingByteBuffer {
+    fileprivate typealias FfiType = RustBuffer
 
-    static func lift(_ buf: RustBuffer) throws -> Self {
-        let reader = Reader(data: Data(rustBuffer: buf))
-        let value = try Self.read(from: reader)
-        if reader.hasRemaining() {
-            throw UniffiInternalError.incompleteData
-        }
-        buf.deallocate()
-        return value
+    fileprivate static func lift(_ buf: RustBuffer) throws -> Self {
+      let reader = Reader(data: Data(rustBuffer: buf))
+      let value = try Self.read(from: reader)
+      if reader.hasRemaining() {
+          throw UniffiInternalError.incompleteData
+      }
+      buf.deallocate()
+      return value
     }
 
-    func lower() -> RustBuffer {
-        let writer = Writer()
-        write(into: writer)
-        return RustBuffer(bytes: writer.bytes)
+    fileprivate func lower() -> RustBuffer {
+      let writer = Writer()
+      self.write(into: writer)
+      return RustBuffer(bytes: writer.bytes)
     }
 }
 
@@ -218,19 +218,21 @@ extension Optional: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Wrapped: S
     }
 }
 
+
+
 extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Serializable {
     fileprivate static func read(from buf: Reader) throws -> Self {
         let len: Int32 = try buf.readInt()
         var seq = [Element]()
         seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
+        for _ in 0..<len {
             seq.append(try Element.read(from: buf))
         }
         return seq
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(count)
+        let len = Int32(self.count)
         buf.writeInt(len)
         for item in self {
             item.write(into: buf)
@@ -238,19 +240,21 @@ extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Seri
     }
 }
 
+
+
 extension Dictionary: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Key == String, Value: Serializable {
     fileprivate static func read(from buf: Reader) throws -> Self {
         let len: Int32 = try buf.readInt()
         var dict = [String: Value]()
         dict.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
+        for _ in 0..<len {
             dict[try String.read(from: buf)] = try Value.read(from: buf)
         }
         return dict
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(count)
+        let len = Int32(self.count)
         buf.writeInt(len)
         for (key, value) in self {
             key.write(into: buf)
@@ -259,25 +263,33 @@ extension Dictionary: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Key == S
     }
 }
 
+
+
+
+
 extension Int64: Primitive, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> Int64 {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 }
+
+
+
+
 
 extension Bool: ViaFfi {
     fileprivate typealias FfiType = Int8
 
     fileprivate static func read(from buf: Reader) throws -> Bool {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 
     fileprivate static func lift(_ v: Int8) throws -> Bool {
@@ -288,6 +300,10 @@ extension Bool: ViaFfi {
         return self ? 1 : 0
     }
 }
+
+
+
+
 
 extension String: ViaFfi {
     fileprivate typealias FfiType = RustBuffer
@@ -304,7 +320,7 @@ extension String: ViaFfi {
     }
 
     fileprivate func lower() -> FfiType {
-        return utf8CString.withUnsafeBufferPointer { ptr in
+        return self.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
                 // The swift string gives us a trailing null byte, we don't want it.
@@ -321,17 +337,268 @@ extension String: ViaFfi {
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(utf8.count)
+        let len = Int32(self.utf8.count)
         buf.writeInt(len)
-        buf.writeBytes(utf8)
+        buf.writeBytes(self.utf8)
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Public interface members begin here.
+
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum DeviceType {
+    
     case desktop
     case mobile
     case tablet
@@ -344,6 +611,7 @@ extension DeviceType: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> DeviceType {
         let variant: Int32 = try buf.readInt()
         switch variant {
+        
         case 1: return .desktop
         case 2: return .mobile
         case 3: return .tablet
@@ -356,32 +624,43 @@ extension DeviceType: ViaFfiUsingByteBuffer, ViaFfi {
 
     fileprivate func write(into buf: Writer) {
         switch self {
+        
+        
         case .desktop:
             buf.writeInt(Int32(1))
-
+        
+        
         case .mobile:
             buf.writeInt(Int32(2))
-
+        
+        
         case .tablet:
             buf.writeInt(Int32(3))
-
+        
+        
         case .vr:
             buf.writeInt(Int32(4))
-
+        
+        
         case .tv:
             buf.writeInt(Int32(5))
-
+        
+        
         case .unknown:
             buf.writeInt(Int32(6))
+        
         }
     }
 }
 
+
 extension DeviceType: Equatable, Hashable {}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum DeviceCapability {
+    
     case sendTab
 }
 
@@ -389,6 +668,7 @@ extension DeviceCapability: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> DeviceCapability {
         let variant: Int32 = try buf.readInt()
         switch variant {
+        
         case 1: return .sendTab
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -396,41 +676,48 @@ extension DeviceCapability: ViaFfiUsingByteBuffer, ViaFfi {
 
     fileprivate func write(into buf: Writer) {
         switch self {
+        
+        
         case .sendTab:
             buf.writeInt(Int32(1))
+        
         }
     }
 }
 
+
 extension DeviceCapability: Equatable, Hashable {}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum AccountEvent {
-    case commandReceived(command: IncomingDeviceCommand)
+    
+    case commandReceived(command: IncomingDeviceCommand )
     case profileUpdated
     case accountAuthStateChanged
     case accountDestroyed
-    case deviceConnected(deviceName: String)
-    case deviceDisconnected(deviceId: String, isLocalDevice: Bool)
+    case deviceConnected(deviceName: String )
+    case deviceDisconnected(deviceId: String, isLocalDevice: Bool )
 }
 
 extension AccountEvent: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> AccountEvent {
         let variant: Int32 = try buf.readInt()
         switch variant {
+        
         case 1: return .commandReceived(
-                command: try IncomingDeviceCommand.read(from: buf)
+            command: try IncomingDeviceCommand.read(from: buf)
             )
         case 2: return .profileUpdated
         case 3: return .accountAuthStateChanged
         case 4: return .accountDestroyed
         case 5: return .deviceConnected(
-                deviceName: try String.read(from: buf)
+            deviceName: try String.read(from: buf)
             )
         case 6: return .deviceDisconnected(
-                deviceId: try String.read(from: buf),
-                isLocalDevice: try Bool.read(from: buf)
+            deviceId: try String.read(from: buf),
+            isLocalDevice: try Bool.read(from: buf)
             )
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -438,46 +725,61 @@ extension AccountEvent: ViaFfiUsingByteBuffer, ViaFfi {
 
     fileprivate func write(into buf: Writer) {
         switch self {
+        
+        
         case let .commandReceived(command):
             buf.writeInt(Int32(1))
             command.write(into: buf)
-
+            
+        
+        
         case .profileUpdated:
             buf.writeInt(Int32(2))
-
+        
+        
         case .accountAuthStateChanged:
             buf.writeInt(Int32(3))
-
+        
+        
         case .accountDestroyed:
             buf.writeInt(Int32(4))
-
+        
+        
         case let .deviceConnected(deviceName):
             buf.writeInt(Int32(5))
             deviceName.write(into: buf)
-
-        case let .deviceDisconnected(deviceId, isLocalDevice):
+            
+        
+        
+        case let .deviceDisconnected(deviceId,isLocalDevice):
             buf.writeInt(Int32(6))
             deviceId.write(into: buf)
             isLocalDevice.write(into: buf)
+            
+        
         }
     }
 }
 
+
 extension AccountEvent: Equatable, Hashable {}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum IncomingDeviceCommand {
-    case tabReceived(sender: Device?, payload: SendTabPayload)
+    
+    case tabReceived(sender: Device?, payload: SendTabPayload )
 }
 
 extension IncomingDeviceCommand: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> IncomingDeviceCommand {
         let variant: Int32 = try buf.readInt()
         switch variant {
+        
         case 1: return .tabReceived(
-                sender: try Device?.read(from: buf),
-                payload: try SendTabPayload.read(from: buf)
+            sender: try Device?.read(from: buf),
+            payload: try SendTabPayload.read(from: buf)
             )
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -485,19 +787,26 @@ extension IncomingDeviceCommand: ViaFfiUsingByteBuffer, ViaFfi {
 
     fileprivate func write(into buf: Writer) {
         switch self {
-        case let .tabReceived(sender, payload):
+        
+        
+        case let .tabReceived(sender,payload):
             buf.writeInt(Int32(1))
             sender.write(into: buf)
             payload.write(into: buf)
+            
+        
         }
     }
 }
 
+
 extension IncomingDeviceCommand: Equatable, Hashable {}
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum MigrationState {
+    
     case none
     case copySessionToken
     case reuseSessionToken
@@ -507,6 +816,7 @@ extension MigrationState: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> MigrationState {
         let variant: Int32 = try buf.readInt()
         switch variant {
+        
         case 1: return .none
         case 2: return .copySessionToken
         case 3: return .reuseSessionToken
@@ -516,22 +826,28 @@ extension MigrationState: ViaFfiUsingByteBuffer, ViaFfi {
 
     fileprivate func write(into buf: Writer) {
         switch self {
+        
+        
         case .none:
             buf.writeInt(Int32(1))
-
+        
+        
         case .copySessionToken:
             buf.writeInt(Int32(2))
-
+        
+        
         case .reuseSessionToken:
             buf.writeInt(Int32(3))
+        
         }
     }
 }
 
+
 extension MigrationState: Equatable, Hashable {}
 // An error type for FFI errors. These errors occur at the UniFFI level, not
 // the library level.
-private enum UniffiInternalError: LocalizedError {
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -555,15 +871,15 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_PANIC: Int8 = 2
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_PANIC: Int8 = 2
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -572,60 +888,75 @@ private extension RustCallStatus {
     }
 }
 
+
+
 public enum FxaError {
+
+    
+    
     // Simple error enums only carry a message
     case Authentication(message: String)
-
+    
     // Simple error enums only carry a message
     case Network(message: String)
-
+    
     // Simple error enums only carry a message
     case NoExistingAuthFlow(message: String)
-
+    
     // Simple error enums only carry a message
     case WrongAuthFlow(message: String)
-
+    
     // Simple error enums only carry a message
     case Panic(message: String)
-
+    
     // Simple error enums only carry a message
     case Other(message: String)
+    
 }
 
 extension FxaError: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> FxaError {
         let variant: Int32 = try buf.readInt()
         switch variant {
+
+        
+
+        
         case 1: return .Authentication(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 2: return .Network(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 3: return .NoExistingAuthFlow(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 4: return .WrongAuthFlow(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 5: return .Panic(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 6: return .Other(
-                message: try String.read(from: buf)
-            )
+            message: try String.read(from: buf)
+        )
+        
 
-        default: throw UniffiInternalError.unexpectedEnumCase
+         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     fileprivate func write(into buf: Writer) {
         switch self {
+
+        
+
+        
         case let .Authentication(message):
             buf.writeInt(Int32(1))
             message.write(into: buf)
@@ -648,9 +979,11 @@ extension FxaError: ViaFfiUsingByteBuffer, ViaFfi {
     }
 }
 
+
 extension FxaError: Equatable, Hashable {}
 
-extension FxaError: Error {}
+extension FxaError: Error { }
+
 
 private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: {
@@ -659,48 +992,48 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
     })
 }
 
-private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
-    try makeRustCall(callback, errorHandler: { try E.lift($0) })
+private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_ errorClass: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
+    try makeRustCall(callback, errorHandler: { return try E.lift($0) })
 }
 
 private func makeRustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T, errorHandler: (RustBuffer) throws -> Error) throws -> T {
-    var callStatus = RustCallStatus()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return returnedVal
+        case CALL_SUCCESS:
+            return returnedVal
 
-    case CALL_ERROR:
-        throw try errorHandler(callStatus.errorBuf)
+        case CALL_ERROR:
+            throw try errorHandler(callStatus.errorBuf)
 
-    case CALL_PANIC:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_PANIC:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
-
 public struct AuthorizationInfo {
     public var active: Bool
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(active: Bool) {
+    public init(active: Bool ) {
         self.active = active
     }
 }
 
+
 extension AuthorizationInfo: Equatable, Hashable {
-    public static func == (lhs: AuthorizationInfo, rhs: AuthorizationInfo) -> Bool {
+    public static func ==(lhs: AuthorizationInfo, rhs: AuthorizationInfo) -> Bool {
         if lhs.active != rhs.active {
             return false
         }
@@ -712,7 +1045,8 @@ extension AuthorizationInfo: Equatable, Hashable {
     }
 }
 
-private extension AuthorizationInfo {
+
+fileprivate extension AuthorizationInfo {
     static func read(from buf: Reader) throws -> AuthorizationInfo {
         return try AuthorizationInfo(
             active: Bool.read(from: buf)
@@ -727,17 +1061,18 @@ private extension AuthorizationInfo {
 extension AuthorizationInfo: ViaFfiUsingByteBuffer, ViaFfi {}
 
 public struct MetricsParams {
-    public var parameters: [String: String]
+    public var parameters: [String:String]
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(parameters: [String: String]) {
+    public init(parameters: [String:String] ) {
         self.parameters = parameters
     }
 }
 
+
 extension MetricsParams: Equatable, Hashable {
-    public static func == (lhs: MetricsParams, rhs: MetricsParams) -> Bool {
+    public static func ==(lhs: MetricsParams, rhs: MetricsParams) -> Bool {
         if lhs.parameters != rhs.parameters {
             return false
         }
@@ -749,10 +1084,11 @@ extension MetricsParams: Equatable, Hashable {
     }
 }
 
-private extension MetricsParams {
+
+fileprivate extension MetricsParams {
     static func read(from buf: Reader) throws -> MetricsParams {
         return try MetricsParams(
-            parameters: [String: String].read(from: buf)
+            parameters: [String:String].read(from: buf)
         )
     }
 
@@ -771,7 +1107,7 @@ public struct AccessTokenInfo {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(scope: String, token: String, key: ScopedKey?, expiresAt: Int64) {
+    public init(scope: String, token: String, key: ScopedKey?, expiresAt: Int64 ) {
         self.scope = scope
         self.token = token
         self.key = key
@@ -779,8 +1115,9 @@ public struct AccessTokenInfo {
     }
 }
 
+
 extension AccessTokenInfo: Equatable, Hashable {
-    public static func == (lhs: AccessTokenInfo, rhs: AccessTokenInfo) -> Bool {
+    public static func ==(lhs: AccessTokenInfo, rhs: AccessTokenInfo) -> Bool {
         if lhs.scope != rhs.scope {
             return false
         }
@@ -804,7 +1141,8 @@ extension AccessTokenInfo: Equatable, Hashable {
     }
 }
 
-private extension AccessTokenInfo {
+
+fileprivate extension AccessTokenInfo {
     static func read(from buf: Reader) throws -> AccessTokenInfo {
         return try AccessTokenInfo(
             scope: String.read(from: buf),
@@ -832,7 +1170,7 @@ public struct ScopedKey {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(kty: String, scope: String, k: String, kid: String) {
+    public init(kty: String, scope: String, k: String, kid: String ) {
         self.kty = kty
         self.scope = scope
         self.k = k
@@ -840,8 +1178,9 @@ public struct ScopedKey {
     }
 }
 
+
 extension ScopedKey: Equatable, Hashable {
-    public static func == (lhs: ScopedKey, rhs: ScopedKey) -> Bool {
+    public static func ==(lhs: ScopedKey, rhs: ScopedKey) -> Bool {
         if lhs.kty != rhs.kty {
             return false
         }
@@ -865,7 +1204,8 @@ extension ScopedKey: Equatable, Hashable {
     }
 }
 
-private extension ScopedKey {
+
+fileprivate extension ScopedKey {
     static func read(from buf: Reader) throws -> ScopedKey {
         return try ScopedKey(
             kty: String.read(from: buf),
@@ -896,7 +1236,7 @@ public struct AuthorizationParameters {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(clientId: String, scope: [String], state: String, accessType: String, codeChallenge: String?, codeChallengeMethod: String?, keysJwk: String?) {
+    public init(clientId: String, scope: [String], state: String, accessType: String, codeChallenge: String?, codeChallengeMethod: String?, keysJwk: String? ) {
         self.clientId = clientId
         self.scope = scope
         self.state = state
@@ -907,8 +1247,9 @@ public struct AuthorizationParameters {
     }
 }
 
+
 extension AuthorizationParameters: Equatable, Hashable {
-    public static func == (lhs: AuthorizationParameters, rhs: AuthorizationParameters) -> Bool {
+    public static func ==(lhs: AuthorizationParameters, rhs: AuthorizationParameters) -> Bool {
         if lhs.clientId != rhs.clientId {
             return false
         }
@@ -944,7 +1285,8 @@ extension AuthorizationParameters: Equatable, Hashable {
     }
 }
 
-private extension AuthorizationParameters {
+
+fileprivate extension AuthorizationParameters {
     static func read(from buf: Reader) throws -> AuthorizationParameters {
         return try AuthorizationParameters(
             clientId: String.read(from: buf),
@@ -982,7 +1324,7 @@ public struct Device {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, displayName: String, deviceType: DeviceType, capabilities: [DeviceCapability], pushSubscription: DevicePushSubscription?, pushEndpointExpired: Bool, isCurrentDevice: Bool, lastAccessTime: Int64?) {
+    public init(id: String, displayName: String, deviceType: DeviceType, capabilities: [DeviceCapability], pushSubscription: DevicePushSubscription?, pushEndpointExpired: Bool, isCurrentDevice: Bool, lastAccessTime: Int64? ) {
         self.id = id
         self.displayName = displayName
         self.deviceType = deviceType
@@ -994,8 +1336,9 @@ public struct Device {
     }
 }
 
+
 extension Device: Equatable, Hashable {
-    public static func == (lhs: Device, rhs: Device) -> Bool {
+    public static func ==(lhs: Device, rhs: Device) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -1035,7 +1378,8 @@ extension Device: Equatable, Hashable {
     }
 }
 
-private extension Device {
+
+fileprivate extension Device {
     static func read(from buf: Reader) throws -> Device {
         return try Device(
             id: String.read(from: buf),
@@ -1070,15 +1414,16 @@ public struct DevicePushSubscription {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(endpoint: String, publicKey: String, authKey: String) {
+    public init(endpoint: String, publicKey: String, authKey: String ) {
         self.endpoint = endpoint
         self.publicKey = publicKey
         self.authKey = authKey
     }
 }
 
+
 extension DevicePushSubscription: Equatable, Hashable {
-    public static func == (lhs: DevicePushSubscription, rhs: DevicePushSubscription) -> Bool {
+    public static func ==(lhs: DevicePushSubscription, rhs: DevicePushSubscription) -> Bool {
         if lhs.endpoint != rhs.endpoint {
             return false
         }
@@ -1098,7 +1443,8 @@ extension DevicePushSubscription: Equatable, Hashable {
     }
 }
 
-private extension DevicePushSubscription {
+
+fileprivate extension DevicePushSubscription {
     static func read(from buf: Reader) throws -> DevicePushSubscription {
         return try DevicePushSubscription(
             endpoint: String.read(from: buf),
@@ -1123,15 +1469,16 @@ public struct SendTabPayload {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(entries: [TabHistoryEntry], flowId: String, streamId: String) {
+    public init(entries: [TabHistoryEntry], flowId: String, streamId: String ) {
         self.entries = entries
         self.flowId = flowId
         self.streamId = streamId
     }
 }
 
+
 extension SendTabPayload: Equatable, Hashable {
-    public static func == (lhs: SendTabPayload, rhs: SendTabPayload) -> Bool {
+    public static func ==(lhs: SendTabPayload, rhs: SendTabPayload) -> Bool {
         if lhs.entries != rhs.entries {
             return false
         }
@@ -1151,7 +1498,8 @@ extension SendTabPayload: Equatable, Hashable {
     }
 }
 
-private extension SendTabPayload {
+
+fileprivate extension SendTabPayload {
     static func read(from buf: Reader) throws -> SendTabPayload {
         return try SendTabPayload(
             entries: [TabHistoryEntry].read(from: buf),
@@ -1175,14 +1523,15 @@ public struct TabHistoryEntry {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(title: String, url: String) {
+    public init(title: String, url: String ) {
         self.title = title
         self.url = url
     }
 }
 
+
 extension TabHistoryEntry: Equatable, Hashable {
-    public static func == (lhs: TabHistoryEntry, rhs: TabHistoryEntry) -> Bool {
+    public static func ==(lhs: TabHistoryEntry, rhs: TabHistoryEntry) -> Bool {
         if lhs.title != rhs.title {
             return false
         }
@@ -1198,7 +1547,8 @@ extension TabHistoryEntry: Equatable, Hashable {
     }
 }
 
-private extension TabHistoryEntry {
+
+fileprivate extension TabHistoryEntry {
     static func read(from buf: Reader) throws -> TabHistoryEntry {
         return try TabHistoryEntry(
             title: String.read(from: buf),
@@ -1226,7 +1576,7 @@ public struct AttachedClient {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(clientId: String?, deviceId: String?, deviceType: DeviceType?, isCurrentSession: Bool, name: String?, createdTime: Int64?, lastAccessTime: Int64?, scope: [String]?) {
+    public init(clientId: String?, deviceId: String?, deviceType: DeviceType?, isCurrentSession: Bool, name: String?, createdTime: Int64?, lastAccessTime: Int64?, scope: [String]? ) {
         self.clientId = clientId
         self.deviceId = deviceId
         self.deviceType = deviceType
@@ -1238,8 +1588,9 @@ public struct AttachedClient {
     }
 }
 
+
 extension AttachedClient: Equatable, Hashable {
-    public static func == (lhs: AttachedClient, rhs: AttachedClient) -> Bool {
+    public static func ==(lhs: AttachedClient, rhs: AttachedClient) -> Bool {
         if lhs.clientId != rhs.clientId {
             return false
         }
@@ -1279,7 +1630,8 @@ extension AttachedClient: Equatable, Hashable {
     }
 }
 
-private extension AttachedClient {
+
+fileprivate extension AttachedClient {
     static func read(from buf: Reader) throws -> AttachedClient {
         return try AttachedClient(
             clientId: String?.read(from: buf),
@@ -1316,7 +1668,7 @@ public struct Profile {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(uid: String, email: String, displayName: String?, avatar: String, isDefaultAvatar: Bool) {
+    public init(uid: String, email: String, displayName: String?, avatar: String, isDefaultAvatar: Bool ) {
         self.uid = uid
         self.email = email
         self.displayName = displayName
@@ -1325,8 +1677,9 @@ public struct Profile {
     }
 }
 
+
 extension Profile: Equatable, Hashable {
-    public static func == (lhs: Profile, rhs: Profile) -> Bool {
+    public static func ==(lhs: Profile, rhs: Profile) -> Bool {
         if lhs.uid != rhs.uid {
             return false
         }
@@ -1354,7 +1707,8 @@ extension Profile: Equatable, Hashable {
     }
 }
 
-private extension Profile {
+
+fileprivate extension Profile {
     static func read(from buf: Reader) throws -> Profile {
         return try Profile(
             uid: String.read(from: buf),
@@ -1381,13 +1735,14 @@ public struct FxAMigrationResult {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(totalDuration: Int64) {
+    public init(totalDuration: Int64 ) {
         self.totalDuration = totalDuration
     }
 }
 
+
 extension FxAMigrationResult: Equatable, Hashable {
-    public static func == (lhs: FxAMigrationResult, rhs: FxAMigrationResult) -> Bool {
+    public static func ==(lhs: FxAMigrationResult, rhs: FxAMigrationResult) -> Bool {
         if lhs.totalDuration != rhs.totalDuration {
             return false
         }
@@ -1399,7 +1754,8 @@ extension FxAMigrationResult: Equatable, Hashable {
     }
 }
 
-private extension FxAMigrationResult {
+
+fileprivate extension FxAMigrationResult {
     static func read(from buf: Reader) throws -> FxAMigrationResult {
         return try FxAMigrationResult(
             totalDuration: Int64.read(from: buf)
@@ -1413,39 +1769,45 @@ private extension FxAMigrationResult {
 
 extension FxAMigrationResult: ViaFfiUsingByteBuffer, ViaFfi {}
 
+
+
+
+
+
 public protocol FirefoxAccountProtocol {
     func toJson() throws -> String
-    func beginOauthFlow(scopes: [String], entrypoint: String, metrics: MetricsParams?) throws -> String
+    func beginOauthFlow(scopes: [String], entrypoint: String, metrics: MetricsParams? ) throws -> String
     func getPairingAuthorityUrl() throws -> String
-    func beginPairingFlow(pairingUrl: String, scopes: [String], entrypoint: String, metrics: MetricsParams?) throws -> String
-    func completeOauthFlow(code: String, state: String) throws
+    func beginPairingFlow(pairingUrl: String, scopes: [String], entrypoint: String, metrics: MetricsParams? ) throws -> String
+    func completeOauthFlow(code: String, state: String ) throws
     func checkAuthorizationStatus() throws -> AuthorizationInfo
-    func disconnect()
-    func getProfile(ignoreCache: Bool) throws -> Profile
-    func initializeDevice(name: String, deviceType: DeviceType, supportedCapabilities: [DeviceCapability]) throws
+    func disconnect() 
+    func getProfile(ignoreCache: Bool ) throws -> Profile
+    func initializeDevice(name: String, deviceType: DeviceType, supportedCapabilities: [DeviceCapability] ) throws
     func getCurrentDeviceId() throws -> String
-    func getDevices(ignoreCache: Bool) throws -> [Device]
+    func getDevices(ignoreCache: Bool ) throws -> [Device]
     func getAttachedClients() throws -> [AttachedClient]
-    func setDeviceName(displayName: String) throws
+    func setDeviceName(displayName: String ) throws
     func clearDeviceName() throws
-    func ensureCapabilities(supportedCapabilities: [DeviceCapability]) throws
-    func setPushSubscription(subscription: DevicePushSubscription) throws
-    func handlePushMessage(payload: String) throws -> [AccountEvent]
+    func ensureCapabilities(supportedCapabilities: [DeviceCapability] ) throws
+    func setPushSubscription(subscription: DevicePushSubscription ) throws
+    func handlePushMessage(payload: String ) throws -> [AccountEvent]
     func pollDeviceCommands() throws -> [IncomingDeviceCommand]
-    func sendSingleTab(targetDeviceId: String, title: String, url: String) throws
+    func sendSingleTab(targetDeviceId: String, title: String, url: String ) throws
     func getTokenServerEndpointUrl() throws -> String
     func getConnectionSuccessUrl() throws -> String
-    func getManageAccountUrl(entrypoint: String) throws -> String
-    func getManageDevicesUrl(entrypoint: String) throws -> String
-    func getAccessToken(scope: String, ttl: Int64?) throws -> AccessTokenInfo
+    func getManageAccountUrl(entrypoint: String ) throws -> String
+    func getManageDevicesUrl(entrypoint: String ) throws -> String
+    func getAccessToken(scope: String, ttl: Int64? ) throws -> AccessTokenInfo
     func getSessionToken() throws -> String
-    func handleSessionTokenChange(sessionToken: String) throws
-    func authorizeCodeUsingSessionToken(params: AuthorizationParameters) throws -> String
-    func clearAccessTokenCache()
+    func handleSessionTokenChange(sessionToken: String ) throws
+    func authorizeCodeUsingSessionToken(params: AuthorizationParameters ) throws -> String
+    func clearAccessTokenCache() 
     func gatherTelemetry() throws -> String
-    func migrateFromSessionToken(sessionToken: String, kSync: String, kXcs: String, copySessionToken: Bool) throws -> FxAMigrationResult
+    func migrateFromSessionToken(sessionToken: String, kSync: String, kXcs: String, copySessionToken: Bool ) throws -> FxAMigrationResult
     func retryMigrateFromSessionToken() throws -> FxAMigrationResult
-    func isInMigrationState() -> MigrationState
+    func isInMigrationState()  -> MigrationState
+    
 }
 
 public class FirefoxAccount: FirefoxAccountProtocol {
@@ -1457,300 +1819,341 @@ public class FirefoxAccount: FirefoxAccountProtocol {
     required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
         self.pointer = pointer
     }
-
-    public convenience init(contentUrl: String, clientId: String, redirectUri: String, tokenServerUrlOverride: String?) {
+    public convenience init(contentUrl: String, clientId: String, redirectUri: String, tokenServerUrlOverride: String? )  {
         self.init(unsafeFromRawPointer: try!
-
-            rustCall {
-                fxa_client_50a2_FirefoxAccount_new(contentUrl.lower(), clientId.lower(), redirectUri.lower(), tokenServerUrlOverride.lower(), $0)
-            })
+    
+    
+    rustCall() {
+    
+    fxa_client_50a2_FirefoxAccount_new(contentUrl.lower(), clientId.lower(), redirectUri.lower(), tokenServerUrlOverride.lower() , $0)
+})
     }
 
     deinit {
         try! rustCall { ffi_fxa_client_50a2_FirefoxAccount_object_free(pointer, $0) }
     }
 
-    public static func fromJson(data: String) throws -> FirefoxAccount {
+    
+    public static func fromJson(data: String ) throws -> FirefoxAccount {
         return FirefoxAccount(unsafeFromRawPointer: try
-
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_from_json(data.lower(), $0)
-            })
+    
+    
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_from_json(data.lower() , $0)
+})
     }
+    
 
+    
     public func toJson() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_to_json(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_to_json(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func beginOauthFlow(scopes: [String], entrypoint: String, metrics: MetricsParams?) throws -> String {
+    public func beginOauthFlow(scopes: [String], entrypoint: String, metrics: MetricsParams? ) throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_begin_oauth_flow(self.pointer, scopes.lower(), entrypoint.lower(), metrics.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_begin_oauth_flow(self.pointer, scopes.lower(), entrypoint.lower(), metrics.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
     public func getPairingAuthorityUrl() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_pairing_authority_url(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_pairing_authority_url(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func beginPairingFlow(pairingUrl: String, scopes: [String], entrypoint: String, metrics: MetricsParams?) throws -> String {
+    public func beginPairingFlow(pairingUrl: String, scopes: [String], entrypoint: String, metrics: MetricsParams? ) throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_begin_pairing_flow(self.pointer, pairingUrl.lower(), scopes.lower(), entrypoint.lower(), metrics.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_begin_pairing_flow(self.pointer, pairingUrl.lower(), scopes.lower(), entrypoint.lower(), metrics.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func completeOauthFlow(code: String, state: String) throws {
+    public func completeOauthFlow(code: String, state: String ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_complete_oauth_flow(self.pointer, code.lower(), state.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_complete_oauth_flow(self.pointer, code.lower(), state.lower() , $0
+    )
+}
     }
-
     public func checkAuthorizationStatus() throws -> AuthorizationInfo {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_check_authorization_status(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_check_authorization_status(self.pointer,  $0
+    )
+}
         return try AuthorizationInfo.lift(_retval)
     }
-
-    public func disconnect() {
+    public func disconnect()  {
         try!
-            rustCall {
-                fxa_client_50a2_FirefoxAccount_disconnect(self.pointer, $0)
-            }
+    rustCall() {
+    
+    fxa_client_50a2_FirefoxAccount_disconnect(self.pointer,  $0
+    )
+}
     }
-
-    public func getProfile(ignoreCache: Bool) throws -> Profile {
+    public func getProfile(ignoreCache: Bool ) throws -> Profile {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_profile(self.pointer, ignoreCache.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_profile(self.pointer, ignoreCache.lower() , $0
+    )
+}
         return try Profile.lift(_retval)
     }
-
-    public func initializeDevice(name: String, deviceType: DeviceType, supportedCapabilities: [DeviceCapability]) throws {
+    public func initializeDevice(name: String, deviceType: DeviceType, supportedCapabilities: [DeviceCapability] ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_initialize_device(self.pointer, name.lower(), deviceType.lower(), supportedCapabilities.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_initialize_device(self.pointer, name.lower(), deviceType.lower(), supportedCapabilities.lower() , $0
+    )
+}
     }
-
     public func getCurrentDeviceId() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_current_device_id(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_current_device_id(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func getDevices(ignoreCache: Bool) throws -> [Device] {
+    public func getDevices(ignoreCache: Bool ) throws -> [Device] {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_devices(self.pointer, ignoreCache.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_devices(self.pointer, ignoreCache.lower() , $0
+    )
+}
         return try [Device].lift(_retval)
     }
-
     public func getAttachedClients() throws -> [AttachedClient] {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_attached_clients(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_attached_clients(self.pointer,  $0
+    )
+}
         return try [AttachedClient].lift(_retval)
     }
-
-    public func setDeviceName(displayName: String) throws {
+    public func setDeviceName(displayName: String ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_set_device_name(self.pointer, displayName.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_set_device_name(self.pointer, displayName.lower() , $0
+    )
+}
     }
-
     public func clearDeviceName() throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_clear_device_name(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_clear_device_name(self.pointer,  $0
+    )
+}
     }
-
-    public func ensureCapabilities(supportedCapabilities: [DeviceCapability]) throws {
+    public func ensureCapabilities(supportedCapabilities: [DeviceCapability] ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_ensure_capabilities(self.pointer, supportedCapabilities.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_ensure_capabilities(self.pointer, supportedCapabilities.lower() , $0
+    )
+}
     }
-
-    public func setPushSubscription(subscription: DevicePushSubscription) throws {
+    public func setPushSubscription(subscription: DevicePushSubscription ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_set_push_subscription(self.pointer, subscription.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_set_push_subscription(self.pointer, subscription.lower() , $0
+    )
+}
     }
-
-    public func handlePushMessage(payload: String) throws -> [AccountEvent] {
+    public func handlePushMessage(payload: String ) throws -> [AccountEvent] {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_handle_push_message(self.pointer, payload.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_handle_push_message(self.pointer, payload.lower() , $0
+    )
+}
         return try [AccountEvent].lift(_retval)
     }
-
     public func pollDeviceCommands() throws -> [IncomingDeviceCommand] {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_poll_device_commands(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_poll_device_commands(self.pointer,  $0
+    )
+}
         return try [IncomingDeviceCommand].lift(_retval)
     }
-
-    public func sendSingleTab(targetDeviceId: String, title: String, url: String) throws {
+    public func sendSingleTab(targetDeviceId: String, title: String, url: String ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_send_single_tab(self.pointer, targetDeviceId.lower(), title.lower(), url.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_send_single_tab(self.pointer, targetDeviceId.lower(), title.lower(), url.lower() , $0
+    )
+}
     }
-
     public func getTokenServerEndpointUrl() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_token_server_endpoint_url(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_token_server_endpoint_url(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
     public func getConnectionSuccessUrl() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_connection_success_url(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_connection_success_url(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func getManageAccountUrl(entrypoint: String) throws -> String {
+    public func getManageAccountUrl(entrypoint: String ) throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_manage_account_url(self.pointer, entrypoint.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_manage_account_url(self.pointer, entrypoint.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func getManageDevicesUrl(entrypoint: String) throws -> String {
+    public func getManageDevicesUrl(entrypoint: String ) throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_manage_devices_url(self.pointer, entrypoint.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_manage_devices_url(self.pointer, entrypoint.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func getAccessToken(scope: String, ttl: Int64?) throws -> AccessTokenInfo {
+    public func getAccessToken(scope: String, ttl: Int64? ) throws -> AccessTokenInfo {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_access_token(self.pointer, scope.lower(), ttl.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_access_token(self.pointer, scope.lower(), ttl.lower() , $0
+    )
+}
         return try AccessTokenInfo.lift(_retval)
     }
-
     public func getSessionToken() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_get_session_token(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_get_session_token(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func handleSessionTokenChange(sessionToken: String) throws {
+    public func handleSessionTokenChange(sessionToken: String ) throws {
         try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_handle_session_token_change(self.pointer, sessionToken.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_handle_session_token_change(self.pointer, sessionToken.lower() , $0
+    )
+}
     }
-
-    public func authorizeCodeUsingSessionToken(params: AuthorizationParameters) throws -> String {
+    public func authorizeCodeUsingSessionToken(params: AuthorizationParameters ) throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_authorize_code_using_session_token(self.pointer, params.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_authorize_code_using_session_token(self.pointer, params.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func clearAccessTokenCache() {
+    public func clearAccessTokenCache()  {
         try!
-            rustCall {
-                fxa_client_50a2_FirefoxAccount_clear_access_token_cache(self.pointer, $0)
-            }
+    rustCall() {
+    
+    fxa_client_50a2_FirefoxAccount_clear_access_token_cache(self.pointer,  $0
+    )
+}
     }
-
     public func gatherTelemetry() throws -> String {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_gather_telemetry(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_gather_telemetry(self.pointer,  $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func migrateFromSessionToken(sessionToken: String, kSync: String, kXcs: String, copySessionToken: Bool) throws -> FxAMigrationResult {
+    public func migrateFromSessionToken(sessionToken: String, kSync: String, kXcs: String, copySessionToken: Bool ) throws -> FxAMigrationResult {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_migrate_from_session_token(self.pointer, sessionToken.lower(), kSync.lower(), kXcs.lower(), copySessionToken.lower(), $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_migrate_from_session_token(self.pointer, sessionToken.lower(), kSync.lower(), kXcs.lower(), copySessionToken.lower() , $0
+    )
+}
         return try FxAMigrationResult.lift(_retval)
     }
-
     public func retryMigrateFromSessionToken() throws -> FxAMigrationResult {
         let _retval = try
-            rustCallWithError(FxaError.self) {
-                fxa_client_50a2_FirefoxAccount_retry_migrate_from_session_token(self.pointer, $0)
-            }
+    rustCallWithError(FxaError.self) {
+    
+    fxa_client_50a2_FirefoxAccount_retry_migrate_from_session_token(self.pointer,  $0
+    )
+}
         return try FxAMigrationResult.lift(_retval)
     }
-
-    public func isInMigrationState() -> MigrationState {
+    public func isInMigrationState()  -> MigrationState {
         let _retval = try!
-            rustCall {
-                fxa_client_50a2_FirefoxAccount_is_in_migration_state(self.pointer, $0)
-            }
+    rustCall() {
+    
+    fxa_client_50a2_FirefoxAccount_is_in_migration_state(self.pointer,  $0
+    )
+}
         return try! MigrationState.lift(_retval)
     }
+    
 }
 
-private extension FirefoxAccount {
-    typealias FfiType = UnsafeMutableRawPointer
 
-    static func read(from buf: Reader) throws -> Self {
+fileprivate extension FirefoxAccount {
+    fileprivate typealias FfiType = UnsafeMutableRawPointer
+
+    fileprivate static func read(from buf: Reader) throws -> Self {
         let v: UInt64 = try buf.readInt()
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
         let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if ptr == nil {
+        if (ptr == nil) {
             throw UniffiInternalError.unexpectedNullPointer
         }
-        return try lift(ptr!)
+        return try self.lift(ptr!)
     }
 
-    func write(into buf: Writer) {
+    fileprivate func write(into buf: Writer) {
         // This fiddling is because `Int` is the thing that's the same size as a pointer.
         // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: lower()))))
+        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: self.lower()))))
     }
 
-    static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
+    fileprivate static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
         return Self(unsafeFromRawPointer: pointer)
     }
 
-    func lower() -> UnsafeMutableRawPointer {
-        return pointer
+    fileprivate func lower() -> UnsafeMutableRawPointer {
+        return self.pointer
     }
 }
 
@@ -1758,4 +2161,6 @@ private extension FirefoxAccount {
 // """
 // 'private' modifier cannot be used with extensions that declare protocol conformances
 // """
-extension FirefoxAccount: ViaFfi, Serializable {}
+extension FirefoxAccount : ViaFfi, Serializable {}
+
+

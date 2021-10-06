@@ -7,10 +7,10 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(MozillaRustComponents)
-    import MozillaRustComponents
+import MozillaRustComponents
 #endif
 
-private extension RustBuffer {
+fileprivate extension RustBuffer {
     // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
@@ -26,12 +26,11 @@ private extension RustBuffer {
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
 }
-
 // For every type used in the interface, we provide helper methods for conveniently
 // lifting and lowering that type from C-compatible data, and for reading and writing
 // values of that type in a buffer.
@@ -39,7 +38,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a libray of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         // TODO: This copies the buffer. Can we read directly from a
         // Rust buffer?
@@ -48,20 +47,20 @@ private extension Data {
 }
 
 // A helper class to read values out of a byte buffer.
-private class Reader {
+fileprivate class Reader {
     let data: Data
     var offset: Data.Index
 
     init(data: Data) {
         self.data = data
-        offset = 0
+        self.offset = 0
     }
 
     // Reads an integer at the current offset, in big-endian order, and advances
     // the offset on success. Throws if reading the integer would move the
     // offset past the end of the buffer.
     func readInt<T: FixedWidthInteger>() throws -> T {
-        let range = offset ..< offset + MemoryLayout<T>.size
+        let range = offset..<offset + MemoryLayout<T>.size
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
@@ -71,22 +70,22 @@ private class Reader {
             return value as! T
         }
         var value: T = 0
-        _ = withUnsafeMutableBytes(of: &value) { data.copyBytes(to: $0, from: range) }
+        let _ = withUnsafeMutableBytes(of: &value, { data.copyBytes(to: $0, from: range)})
         offset = range.upperBound
         return value.bigEndian
     }
 
     // Reads an arbitrary number of bytes, to be used to read
     // raw bytes, this is useful when lifting strings
-    func readBytes(count: Int) throws -> [UInt8] {
-        let range = offset ..< (offset + count)
+    func readBytes(count: Int) throws -> Array<UInt8> {
+        let range = offset..<(offset+count)
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
         var value = [UInt8](repeating: 0, count: count)
-        value.withUnsafeMutableBufferPointer { buffer in
+        value.withUnsafeMutableBufferPointer({ buffer in
             data.copyBytes(to: buffer, from: range)
-        }
+        })
         offset = range.upperBound
         return value
     }
@@ -111,13 +110,13 @@ private class Reader {
 }
 
 // A helper class to write values into a byte buffer.
-private class Writer {
+fileprivate class Writer {
     var bytes: [UInt8]
     var offset: Array<UInt8>.Index
 
     init() {
-        bytes = []
-        offset = 0
+        self.bytes = []
+        self.offset = 0
     }
 
     func writeBytes<S>(_ byteArr: S) where S: Sequence, S.Element == UInt8 {
@@ -144,56 +143,57 @@ private class Writer {
     }
 }
 
+
 // Types conforming to `Serializable` can be read and written in a bytebuffer.
-private protocol Serializable {
+fileprivate protocol Serializable {
     func write(into: Writer)
     static func read(from: Reader) throws -> Self
 }
 
 // Types confirming to `ViaFfi` can be transferred back-and-for over the FFI.
 // This is analogous to the Rust trait of the same name.
-private protocol ViaFfi: Serializable {
+fileprivate protocol ViaFfi: Serializable {
     associatedtype FfiType
     static func lift(_ v: FfiType) throws -> Self
     func lower() -> FfiType
 }
 
 // Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol Primitive {}
+fileprivate protocol Primitive {}
 
-private extension Primitive {
-    typealias FfiType = Self
+extension Primitive {
+    fileprivate typealias FfiType = Self
 
-    static func lift(_ v: Self) throws -> Self {
+    fileprivate static func lift(_ v: Self) throws -> Self {
         return v
     }
 
-    func lower() -> Self {
+    fileprivate func lower() -> Self {
         return self
     }
 }
 
 // Types conforming to `ViaFfiUsingByteBuffer` lift and lower into a bytebuffer.
 // Use this for complex types where it's hard to write a custom lift/lower.
-private protocol ViaFfiUsingByteBuffer: Serializable {}
+fileprivate protocol ViaFfiUsingByteBuffer: Serializable {}
 
-private extension ViaFfiUsingByteBuffer {
-    typealias FfiType = RustBuffer
+extension ViaFfiUsingByteBuffer {
+    fileprivate typealias FfiType = RustBuffer
 
-    static func lift(_ buf: RustBuffer) throws -> Self {
-        let reader = Reader(data: Data(rustBuffer: buf))
-        let value = try Self.read(from: reader)
-        if reader.hasRemaining() {
-            throw UniffiInternalError.incompleteData
-        }
-        buf.deallocate()
-        return value
+    fileprivate static func lift(_ buf: RustBuffer) throws -> Self {
+      let reader = Reader(data: Data(rustBuffer: buf))
+      let value = try Self.read(from: reader)
+      if reader.hasRemaining() {
+          throw UniffiInternalError.incompleteData
+      }
+      buf.deallocate()
+      return value
     }
 
-    func lower() -> RustBuffer {
-        let writer = Writer()
-        write(into: writer)
-        return RustBuffer(bytes: writer.bytes)
+    fileprivate func lower() -> RustBuffer {
+      let writer = Writer()
+      self.write(into: writer)
+      return RustBuffer(bytes: writer.bytes)
     }
 }
 
@@ -218,19 +218,21 @@ extension Optional: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Wrapped: S
     }
 }
 
+
+
 extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Serializable {
     fileprivate static func read(from buf: Reader) throws -> Self {
         let len: Int32 = try buf.readInt()
         var seq = [Element]()
         seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
+        for _ in 0..<len {
             seq.append(try Element.read(from: buf))
         }
         return seq
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(count)
+        let len = Int32(self.count)
         buf.writeInt(len)
         for item in self {
             item.write(into: buf)
@@ -238,19 +240,21 @@ extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Seri
     }
 }
 
+
+
 extension Dictionary: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Key == String, Value: Serializable {
     fileprivate static func read(from buf: Reader) throws -> Self {
         let len: Int32 = try buf.readInt()
         var dict = [String: Value]()
         dict.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
+        for _ in 0..<len {
             dict[try String.read(from: buf)] = try Value.read(from: buf)
         }
         return dict
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(count)
+        let len = Int32(self.count)
         buf.writeInt(len)
         for (key, value) in self {
             key.write(into: buf)
@@ -259,45 +263,61 @@ extension Dictionary: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Key == S
     }
 }
 
+
+
+
+
 extension Int8: Primitive, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> Int8 {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 }
+
+
+
+
 
 extension Int32: Primitive, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> Int32 {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 }
+
+
+
+
 
 extension Int64: Primitive, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> Int64 {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 }
+
+
+
+
 
 extension Bool: ViaFfi {
     fileprivate typealias FfiType = Int8
 
     fileprivate static func read(from buf: Reader) throws -> Bool {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 
     fileprivate static func lift(_ v: Int8) throws -> Bool {
@@ -308,6 +328,10 @@ extension Bool: ViaFfi {
         return self ? 1 : 0
     }
 }
+
+
+
+
 
 extension String: ViaFfi {
     fileprivate typealias FfiType = RustBuffer
@@ -324,7 +348,7 @@ extension String: ViaFfi {
     }
 
     fileprivate func lower() -> FfiType {
-        return utf8CString.withUnsafeBufferPointer { ptr in
+        return self.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
                 // The swift string gives us a trailing null byte, we don't want it.
@@ -341,17 +365,163 @@ extension String: ViaFfi {
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(utf8.count)
+        let len = Int32(self.utf8.count)
         buf.writeInt(len)
-        buf.writeBytes(utf8)
+        buf.writeBytes(self.utf8)
     }
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Public interface members begin here.
+
+
 
 // Note that we don't yet support `indirect` for enums.
 // See https://github.com/mozilla/uniffi-rs/issues/396 for further discussion.
 public enum EnrollmentChangeEventType {
+    
     case enrollment
     case disqualification
     case unenrollment
@@ -361,6 +531,7 @@ extension EnrollmentChangeEventType: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> EnrollmentChangeEventType {
         let variant: Int32 = try buf.readInt()
         switch variant {
+        
         case 1: return .enrollment
         case 2: return .disqualification
         case 3: return .unenrollment
@@ -370,22 +541,28 @@ extension EnrollmentChangeEventType: ViaFfiUsingByteBuffer, ViaFfi {
 
     fileprivate func write(into buf: Writer) {
         switch self {
+        
+        
         case .enrollment:
             buf.writeInt(Int32(1))
-
+        
+        
         case .disqualification:
             buf.writeInt(Int32(2))
-
+        
+        
         case .unenrollment:
             buf.writeInt(Int32(3))
+        
         }
     }
 }
 
+
 extension EnrollmentChangeEventType: Equatable, Hashable {}
 // An error type for FFI errors. These errors occur at the UniFFI level, not
 // the library level.
-private enum UniffiInternalError: LocalizedError {
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -409,15 +586,15 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_PANIC: Int8 = 2
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_PANIC: Int8 = 2
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -426,165 +603,180 @@ private extension RustCallStatus {
     }
 }
 
+
+
 public enum NimbusError {
+
+    
+    
     // Simple error enums only carry a message
     case InvalidPersistedData(message: String)
-
+    
     // Simple error enums only carry a message
     case RkvError(message: String)
-
+    
     // Simple error enums only carry a message
     case IoError(message: String)
-
+    
     // Simple error enums only carry a message
     case JsonError(message: String)
-
+    
     // Simple error enums only carry a message
     case EvaluationError(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidExpression(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidFraction(message: String)
-
+    
     // Simple error enums only carry a message
     case TryFromSliceError(message: String)
-
+    
     // Simple error enums only carry a message
     case EmptyRatiosError(message: String)
-
+    
     // Simple error enums only carry a message
     case OutOfBoundsError(message: String)
-
+    
     // Simple error enums only carry a message
     case UrlParsingError(message: String)
-
+    
     // Simple error enums only carry a message
     case RequestError(message: String)
-
+    
     // Simple error enums only carry a message
     case ResponseError(message: String)
-
+    
     // Simple error enums only carry a message
     case UuidError(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidExperimentFormat(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidPath(message: String)
-
+    
     // Simple error enums only carry a message
     case InternalError(message: String)
-
+    
     // Simple error enums only carry a message
     case NoSuchExperiment(message: String)
-
+    
     // Simple error enums only carry a message
     case NoSuchBranch(message: String)
-
+    
     // Simple error enums only carry a message
     case BackoffError(message: String)
-
+    
     // Simple error enums only carry a message
     case DatabaseNotReady(message: String)
+    
 }
 
 extension NimbusError: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> NimbusError {
         let variant: Int32 = try buf.readInt()
         switch variant {
+
+        
+
+        
         case 1: return .InvalidPersistedData(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 2: return .RkvError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 3: return .IoError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 4: return .JsonError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 5: return .EvaluationError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 6: return .InvalidExpression(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 7: return .InvalidFraction(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 8: return .TryFromSliceError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 9: return .EmptyRatiosError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 10: return .OutOfBoundsError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 11: return .UrlParsingError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 12: return .RequestError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 13: return .ResponseError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 14: return .UuidError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 15: return .InvalidExperimentFormat(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 16: return .InvalidPath(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 17: return .InternalError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 18: return .NoSuchExperiment(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 19: return .NoSuchBranch(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 20: return .BackoffError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 21: return .DatabaseNotReady(
-                message: try String.read(from: buf)
-            )
+            message: try String.read(from: buf)
+        )
+        
 
-        default: throw UniffiInternalError.unexpectedEnumCase
+         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     fileprivate func write(into buf: Writer) {
         switch self {
+
+        
+
+        
         case let .InvalidPersistedData(message):
             buf.writeInt(Int32(1))
             message.write(into: buf)
@@ -652,9 +844,11 @@ extension NimbusError: ViaFfiUsingByteBuffer, ViaFfi {
     }
 }
 
+
 extension NimbusError: Equatable, Hashable {}
 
-extension NimbusError: Error {}
+extension NimbusError: Error { }
+
 
 private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: {
@@ -663,36 +857,35 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
     })
 }
 
-private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
-    try makeRustCall(callback, errorHandler: { try E.lift($0) })
+private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_ errorClass: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
+    try makeRustCall(callback, errorHandler: { return try E.lift($0) })
 }
 
 private func makeRustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T, errorHandler: (RustBuffer) throws -> Error) throws -> T {
-    var callStatus = RustCallStatus()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return returnedVal
+        case CALL_SUCCESS:
+            return returnedVal
 
-    case CALL_ERROR:
-        throw try errorHandler(callStatus.errorBuf)
+        case CALL_ERROR:
+            throw try errorHandler(callStatus.errorBuf)
 
-    case CALL_PANIC:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_PANIC:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
-
 public struct AppContext {
     public var appName: String
     public var appId: String
@@ -709,11 +902,11 @@ public struct AppContext {
     public var debugTag: String?
     public var installationDate: Int64?
     public var homeDirectory: String?
-    public var customTargetingAttributes: [String: String]?
+    public var customTargetingAttributes: [String:String]?
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(appName: String, appId: String, channel: String, appVersion: String?, appBuild: String?, architecture: String?, deviceManufacturer: String?, deviceModel: String?, locale: String?, os: String?, osVersion: String?, androidSdkVersion: String?, debugTag: String?, installationDate: Int64?, homeDirectory: String?, customTargetingAttributes: [String: String]?) {
+    public init(appName: String, appId: String, channel: String, appVersion: String?, appBuild: String?, architecture: String?, deviceManufacturer: String?, deviceModel: String?, locale: String?, os: String?, osVersion: String?, androidSdkVersion: String?, debugTag: String?, installationDate: Int64?, homeDirectory: String?, customTargetingAttributes: [String:String]? ) {
         self.appName = appName
         self.appId = appId
         self.channel = channel
@@ -733,8 +926,9 @@ public struct AppContext {
     }
 }
 
+
 extension AppContext: Equatable, Hashable {
-    public static func == (lhs: AppContext, rhs: AppContext) -> Bool {
+    public static func ==(lhs: AppContext, rhs: AppContext) -> Bool {
         if lhs.appName != rhs.appName {
             return false
         }
@@ -806,7 +1000,8 @@ extension AppContext: Equatable, Hashable {
     }
 }
 
-private extension AppContext {
+
+fileprivate extension AppContext {
     static func read(from buf: Reader) throws -> AppContext {
         return try AppContext(
             appName: String.read(from: buf),
@@ -824,7 +1019,7 @@ private extension AppContext {
             debugTag: String?.read(from: buf),
             installationDate: Int64?.read(from: buf),
             homeDirectory: String?.read(from: buf),
-            customTargetingAttributes: [String: String]?.read(from: buf)
+            customTargetingAttributes: [String:String]?.read(from: buf)
         )
     }
 
@@ -860,7 +1055,7 @@ public struct EnrolledExperiment {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(featureIds: [String], slug: String, userFacingName: String, userFacingDescription: String, branchSlug: String, enrollmentId: String) {
+    public init(featureIds: [String], slug: String, userFacingName: String, userFacingDescription: String, branchSlug: String, enrollmentId: String ) {
         self.featureIds = featureIds
         self.slug = slug
         self.userFacingName = userFacingName
@@ -870,8 +1065,9 @@ public struct EnrolledExperiment {
     }
 }
 
+
 extension EnrolledExperiment: Equatable, Hashable {
-    public static func == (lhs: EnrolledExperiment, rhs: EnrolledExperiment) -> Bool {
+    public static func ==(lhs: EnrolledExperiment, rhs: EnrolledExperiment) -> Bool {
         if lhs.featureIds != rhs.featureIds {
             return false
         }
@@ -903,7 +1099,8 @@ extension EnrolledExperiment: Equatable, Hashable {
     }
 }
 
-private extension EnrolledExperiment {
+
+fileprivate extension EnrolledExperiment {
     static func read(from buf: Reader) throws -> EnrolledExperiment {
         return try EnrolledExperiment(
             featureIds: [String].read(from: buf),
@@ -936,7 +1133,7 @@ public struct AvailableExperiment {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(slug: String, userFacingName: String, userFacingDescription: String, branches: [ExperimentBranch], referenceBranch: String?) {
+    public init(slug: String, userFacingName: String, userFacingDescription: String, branches: [ExperimentBranch], referenceBranch: String? ) {
         self.slug = slug
         self.userFacingName = userFacingName
         self.userFacingDescription = userFacingDescription
@@ -945,8 +1142,9 @@ public struct AvailableExperiment {
     }
 }
 
+
 extension AvailableExperiment: Equatable, Hashable {
-    public static func == (lhs: AvailableExperiment, rhs: AvailableExperiment) -> Bool {
+    public static func ==(lhs: AvailableExperiment, rhs: AvailableExperiment) -> Bool {
         if lhs.slug != rhs.slug {
             return false
         }
@@ -974,7 +1172,8 @@ extension AvailableExperiment: Equatable, Hashable {
     }
 }
 
-private extension AvailableExperiment {
+
+fileprivate extension AvailableExperiment {
     static func read(from buf: Reader) throws -> AvailableExperiment {
         return try AvailableExperiment(
             slug: String.read(from: buf),
@@ -1002,14 +1201,15 @@ public struct ExperimentBranch {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(slug: String, ratio: Int32) {
+    public init(slug: String, ratio: Int32 ) {
         self.slug = slug
         self.ratio = ratio
     }
 }
 
+
 extension ExperimentBranch: Equatable, Hashable {
-    public static func == (lhs: ExperimentBranch, rhs: ExperimentBranch) -> Bool {
+    public static func ==(lhs: ExperimentBranch, rhs: ExperimentBranch) -> Bool {
         if lhs.slug != rhs.slug {
             return false
         }
@@ -1025,7 +1225,8 @@ extension ExperimentBranch: Equatable, Hashable {
     }
 }
 
-private extension ExperimentBranch {
+
+fileprivate extension ExperimentBranch {
     static func read(from buf: Reader) throws -> ExperimentBranch {
         return try ExperimentBranch(
             slug: String.read(from: buf),
@@ -1047,14 +1248,15 @@ public struct RemoteSettingsConfig {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(serverUrl: String, collectionName: String) {
+    public init(serverUrl: String, collectionName: String ) {
         self.serverUrl = serverUrl
         self.collectionName = collectionName
     }
 }
 
+
 extension RemoteSettingsConfig: Equatable, Hashable {
-    public static func == (lhs: RemoteSettingsConfig, rhs: RemoteSettingsConfig) -> Bool {
+    public static func ==(lhs: RemoteSettingsConfig, rhs: RemoteSettingsConfig) -> Bool {
         if lhs.serverUrl != rhs.serverUrl {
             return false
         }
@@ -1070,7 +1272,8 @@ extension RemoteSettingsConfig: Equatable, Hashable {
     }
 }
 
-private extension RemoteSettingsConfig {
+
+fileprivate extension RemoteSettingsConfig {
     static func read(from buf: Reader) throws -> RemoteSettingsConfig {
         return try RemoteSettingsConfig(
             serverUrl: String.read(from: buf),
@@ -1092,14 +1295,15 @@ public struct AvailableRandomizationUnits {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(clientId: String?, dummy: Int8) {
+    public init(clientId: String?, dummy: Int8 ) {
         self.clientId = clientId
         self.dummy = dummy
     }
 }
 
+
 extension AvailableRandomizationUnits: Equatable, Hashable {
-    public static func == (lhs: AvailableRandomizationUnits, rhs: AvailableRandomizationUnits) -> Bool {
+    public static func ==(lhs: AvailableRandomizationUnits, rhs: AvailableRandomizationUnits) -> Bool {
         if lhs.clientId != rhs.clientId {
             return false
         }
@@ -1115,7 +1319,8 @@ extension AvailableRandomizationUnits: Equatable, Hashable {
     }
 }
 
-private extension AvailableRandomizationUnits {
+
+fileprivate extension AvailableRandomizationUnits {
     static func read(from buf: Reader) throws -> AvailableRandomizationUnits {
         return try AvailableRandomizationUnits(
             clientId: String?.read(from: buf),
@@ -1140,7 +1345,7 @@ public struct EnrollmentChangeEvent {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(experimentSlug: String, branchSlug: String, enrollmentId: String, reason: String?, change: EnrollmentChangeEventType) {
+    public init(experimentSlug: String, branchSlug: String, enrollmentId: String, reason: String?, change: EnrollmentChangeEventType ) {
         self.experimentSlug = experimentSlug
         self.branchSlug = branchSlug
         self.enrollmentId = enrollmentId
@@ -1149,8 +1354,9 @@ public struct EnrollmentChangeEvent {
     }
 }
 
+
 extension EnrollmentChangeEvent: Equatable, Hashable {
-    public static func == (lhs: EnrollmentChangeEvent, rhs: EnrollmentChangeEvent) -> Bool {
+    public static func ==(lhs: EnrollmentChangeEvent, rhs: EnrollmentChangeEvent) -> Bool {
         if lhs.experimentSlug != rhs.experimentSlug {
             return false
         }
@@ -1178,7 +1384,8 @@ extension EnrollmentChangeEvent: Equatable, Hashable {
     }
 }
 
-private extension EnrollmentChangeEvent {
+
+fileprivate extension EnrollmentChangeEvent {
     static func read(from buf: Reader) throws -> EnrollmentChangeEvent {
         return try EnrollmentChangeEvent(
             experimentSlug: String.read(from: buf),
@@ -1200,22 +1407,28 @@ private extension EnrollmentChangeEvent {
 
 extension EnrollmentChangeEvent: ViaFfiUsingByteBuffer, ViaFfi {}
 
+
+
+
+
+
 public protocol NimbusClientProtocol {
     func initialize() throws
-    func getExperimentBranch(id: String) throws -> String?
-    func getFeatureConfigVariables(featureId: String) throws -> String?
-    func getExperimentBranches(experimentSlug: String) throws -> [ExperimentBranch]
+    func getExperimentBranch(id: String ) throws -> String?
+    func getFeatureConfigVariables(featureId: String ) throws -> String?
+    func getExperimentBranches(experimentSlug: String ) throws -> [ExperimentBranch]
     func getActiveExperiments() throws -> [EnrolledExperiment]
     func getAvailableExperiments() throws -> [AvailableExperiment]
     func getGlobalUserParticipation() throws -> Bool
-    func setGlobalUserParticipation(optIn: Bool) throws -> [EnrollmentChangeEvent]
+    func setGlobalUserParticipation(optIn: Bool ) throws -> [EnrollmentChangeEvent]
     func updateExperiments() throws -> [EnrollmentChangeEvent]
     func fetchExperiments() throws
     func applyPendingExperiments() throws -> [EnrollmentChangeEvent]
-    func setExperimentsLocally(experimentsJson: String) throws
-    func optInWithBranch(experimentSlug: String, branch: String) throws -> [EnrollmentChangeEvent]
-    func optOut(experimentSlug: String) throws -> [EnrollmentChangeEvent]
-    func resetTelemetryIdentifiers(newRandomizationUnits: AvailableRandomizationUnits) throws -> [EnrollmentChangeEvent]
+    func setExperimentsLocally(experimentsJson: String ) throws
+    func optInWithBranch(experimentSlug: String, branch: String ) throws -> [EnrollmentChangeEvent]
+    func optOut(experimentSlug: String ) throws -> [EnrollmentChangeEvent]
+    func resetTelemetryIdentifiers(newRandomizationUnits: AvailableRandomizationUnits ) throws -> [EnrollmentChangeEvent]
+    
 }
 
 public class NimbusClient: NimbusClientProtocol {
@@ -1227,163 +1440,185 @@ public class NimbusClient: NimbusClientProtocol {
     required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
         self.pointer = pointer
     }
-
-    public convenience init(appCtx: AppContext, dbpath: String, remoteSettingsConfig: RemoteSettingsConfig?, availableRandomizationUnits: AvailableRandomizationUnits) throws {
+    public convenience init(appCtx: AppContext, dbpath: String, remoteSettingsConfig: RemoteSettingsConfig?, availableRandomizationUnits: AvailableRandomizationUnits ) throws {
         self.init(unsafeFromRawPointer: try
-
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_new(appCtx.lower(), dbpath.lower(), remoteSettingsConfig.lower(), availableRandomizationUnits.lower(), $0)
-            })
+    
+    
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_new(appCtx.lower(), dbpath.lower(), remoteSettingsConfig.lower(), availableRandomizationUnits.lower() , $0)
+})
     }
 
     deinit {
         try! rustCall { ffi_nimbus_b809_NimbusClient_object_free(pointer, $0) }
     }
 
+    
+
+    
     public func initialize() throws {
         try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_initialize(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_initialize(self.pointer,  $0
+    )
+}
     }
-
-    public func getExperimentBranch(id: String) throws -> String? {
+    public func getExperimentBranch(id: String ) throws -> String? {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_get_experiment_branch(self.pointer, id.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_get_experiment_branch(self.pointer, id.lower() , $0
+    )
+}
         return try String?.lift(_retval)
     }
-
-    public func getFeatureConfigVariables(featureId: String) throws -> String? {
+    public func getFeatureConfigVariables(featureId: String ) throws -> String? {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_get_feature_config_variables(self.pointer, featureId.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_get_feature_config_variables(self.pointer, featureId.lower() , $0
+    )
+}
         return try String?.lift(_retval)
     }
-
-    public func getExperimentBranches(experimentSlug: String) throws -> [ExperimentBranch] {
+    public func getExperimentBranches(experimentSlug: String ) throws -> [ExperimentBranch] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_get_experiment_branches(self.pointer, experimentSlug.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_get_experiment_branches(self.pointer, experimentSlug.lower() , $0
+    )
+}
         return try [ExperimentBranch].lift(_retval)
     }
-
     public func getActiveExperiments() throws -> [EnrolledExperiment] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_get_active_experiments(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_get_active_experiments(self.pointer,  $0
+    )
+}
         return try [EnrolledExperiment].lift(_retval)
     }
-
     public func getAvailableExperiments() throws -> [AvailableExperiment] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_get_available_experiments(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_get_available_experiments(self.pointer,  $0
+    )
+}
         return try [AvailableExperiment].lift(_retval)
     }
-
     public func getGlobalUserParticipation() throws -> Bool {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_get_global_user_participation(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_get_global_user_participation(self.pointer,  $0
+    )
+}
         return try Bool.lift(_retval)
     }
-
-    public func setGlobalUserParticipation(optIn: Bool) throws -> [EnrollmentChangeEvent] {
+    public func setGlobalUserParticipation(optIn: Bool ) throws -> [EnrollmentChangeEvent] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_set_global_user_participation(self.pointer, optIn.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_set_global_user_participation(self.pointer, optIn.lower() , $0
+    )
+}
         return try [EnrollmentChangeEvent].lift(_retval)
     }
-
     public func updateExperiments() throws -> [EnrollmentChangeEvent] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_update_experiments(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_update_experiments(self.pointer,  $0
+    )
+}
         return try [EnrollmentChangeEvent].lift(_retval)
     }
-
     public func fetchExperiments() throws {
         try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_fetch_experiments(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_fetch_experiments(self.pointer,  $0
+    )
+}
     }
-
     public func applyPendingExperiments() throws -> [EnrollmentChangeEvent] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_apply_pending_experiments(self.pointer, $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_apply_pending_experiments(self.pointer,  $0
+    )
+}
         return try [EnrollmentChangeEvent].lift(_retval)
     }
-
-    public func setExperimentsLocally(experimentsJson: String) throws {
+    public func setExperimentsLocally(experimentsJson: String ) throws {
         try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_set_experiments_locally(self.pointer, experimentsJson.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_set_experiments_locally(self.pointer, experimentsJson.lower() , $0
+    )
+}
     }
-
-    public func optInWithBranch(experimentSlug: String, branch: String) throws -> [EnrollmentChangeEvent] {
+    public func optInWithBranch(experimentSlug: String, branch: String ) throws -> [EnrollmentChangeEvent] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_opt_in_with_branch(self.pointer, experimentSlug.lower(), branch.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_opt_in_with_branch(self.pointer, experimentSlug.lower(), branch.lower() , $0
+    )
+}
         return try [EnrollmentChangeEvent].lift(_retval)
     }
-
-    public func optOut(experimentSlug: String) throws -> [EnrollmentChangeEvent] {
+    public func optOut(experimentSlug: String ) throws -> [EnrollmentChangeEvent] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_opt_out(self.pointer, experimentSlug.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_opt_out(self.pointer, experimentSlug.lower() , $0
+    )
+}
         return try [EnrollmentChangeEvent].lift(_retval)
     }
-
-    public func resetTelemetryIdentifiers(newRandomizationUnits: AvailableRandomizationUnits) throws -> [EnrollmentChangeEvent] {
+    public func resetTelemetryIdentifiers(newRandomizationUnits: AvailableRandomizationUnits ) throws -> [EnrollmentChangeEvent] {
         let _retval = try
-            rustCallWithError(NimbusError.self) {
-                nimbus_b809_NimbusClient_reset_telemetry_identifiers(self.pointer, newRandomizationUnits.lower(), $0)
-            }
+    rustCallWithError(NimbusError.self) {
+    
+    nimbus_b809_NimbusClient_reset_telemetry_identifiers(self.pointer, newRandomizationUnits.lower() , $0
+    )
+}
         return try [EnrollmentChangeEvent].lift(_retval)
     }
+    
 }
 
-private extension NimbusClient {
-    typealias FfiType = UnsafeMutableRawPointer
 
-    static func read(from buf: Reader) throws -> Self {
+fileprivate extension NimbusClient {
+    fileprivate typealias FfiType = UnsafeMutableRawPointer
+
+    fileprivate static func read(from buf: Reader) throws -> Self {
         let v: UInt64 = try buf.readInt()
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
         let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if ptr == nil {
+        if (ptr == nil) {
             throw UniffiInternalError.unexpectedNullPointer
         }
-        return try lift(ptr!)
+        return try self.lift(ptr!)
     }
 
-    func write(into buf: Writer) {
+    fileprivate func write(into buf: Writer) {
         // This fiddling is because `Int` is the thing that's the same size as a pointer.
         // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: lower()))))
+        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: self.lower()))))
     }
 
-    static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
+    fileprivate static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
         return Self(unsafeFromRawPointer: pointer)
     }
 
-    func lower() -> UnsafeMutableRawPointer {
-        return pointer
+    fileprivate func lower() -> UnsafeMutableRawPointer {
+        return self.pointer
     }
 }
 
@@ -1391,4 +1626,6 @@ private extension NimbusClient {
 // """
 // 'private' modifier cannot be used with extensions that declare protocol conformances
 // """
-extension NimbusClient: ViaFfi, Serializable {}
+extension NimbusClient : ViaFfi, Serializable {}
+
+

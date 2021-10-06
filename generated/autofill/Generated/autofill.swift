@@ -7,10 +7,10 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(MozillaRustComponents)
-    import MozillaRustComponents
+import MozillaRustComponents
 #endif
 
-private extension RustBuffer {
+fileprivate extension RustBuffer {
     // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
@@ -26,12 +26,11 @@ private extension RustBuffer {
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
 }
-
 // For every type used in the interface, we provide helper methods for conveniently
 // lifting and lowering that type from C-compatible data, and for reading and writing
 // values of that type in a buffer.
@@ -39,7 +38,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a libray of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         // TODO: This copies the buffer. Can we read directly from a
         // Rust buffer?
@@ -48,20 +47,20 @@ private extension Data {
 }
 
 // A helper class to read values out of a byte buffer.
-private class Reader {
+fileprivate class Reader {
     let data: Data
     var offset: Data.Index
 
     init(data: Data) {
         self.data = data
-        offset = 0
+        self.offset = 0
     }
 
     // Reads an integer at the current offset, in big-endian order, and advances
     // the offset on success. Throws if reading the integer would move the
     // offset past the end of the buffer.
     func readInt<T: FixedWidthInteger>() throws -> T {
-        let range = offset ..< offset + MemoryLayout<T>.size
+        let range = offset..<offset + MemoryLayout<T>.size
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
@@ -71,22 +70,22 @@ private class Reader {
             return value as! T
         }
         var value: T = 0
-        _ = withUnsafeMutableBytes(of: &value) { data.copyBytes(to: $0, from: range) }
+        let _ = withUnsafeMutableBytes(of: &value, { data.copyBytes(to: $0, from: range)})
         offset = range.upperBound
         return value.bigEndian
     }
 
     // Reads an arbitrary number of bytes, to be used to read
     // raw bytes, this is useful when lifting strings
-    func readBytes(count: Int) throws -> [UInt8] {
-        let range = offset ..< (offset + count)
+    func readBytes(count: Int) throws -> Array<UInt8> {
+        let range = offset..<(offset+count)
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
         var value = [UInt8](repeating: 0, count: count)
-        value.withUnsafeMutableBufferPointer { buffer in
+        value.withUnsafeMutableBufferPointer({ buffer in
             data.copyBytes(to: buffer, from: range)
-        }
+        })
         offset = range.upperBound
         return value
     }
@@ -111,13 +110,13 @@ private class Reader {
 }
 
 // A helper class to write values into a byte buffer.
-private class Writer {
+fileprivate class Writer {
     var bytes: [UInt8]
     var offset: Array<UInt8>.Index
 
     init() {
-        bytes = []
-        offset = 0
+        self.bytes = []
+        self.offset = 0
     }
 
     func writeBytes<S>(_ byteArr: S) where S: Sequence, S.Element == UInt8 {
@@ -144,56 +143,57 @@ private class Writer {
     }
 }
 
+
 // Types conforming to `Serializable` can be read and written in a bytebuffer.
-private protocol Serializable {
+fileprivate protocol Serializable {
     func write(into: Writer)
     static func read(from: Reader) throws -> Self
 }
 
 // Types confirming to `ViaFfi` can be transferred back-and-for over the FFI.
 // This is analogous to the Rust trait of the same name.
-private protocol ViaFfi: Serializable {
+fileprivate protocol ViaFfi: Serializable {
     associatedtype FfiType
     static func lift(_ v: FfiType) throws -> Self
     func lower() -> FfiType
 }
 
 // Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol Primitive {}
+fileprivate protocol Primitive {}
 
-private extension Primitive {
-    typealias FfiType = Self
+extension Primitive {
+    fileprivate typealias FfiType = Self
 
-    static func lift(_ v: Self) throws -> Self {
+    fileprivate static func lift(_ v: Self) throws -> Self {
         return v
     }
 
-    func lower() -> Self {
+    fileprivate func lower() -> Self {
         return self
     }
 }
 
 // Types conforming to `ViaFfiUsingByteBuffer` lift and lower into a bytebuffer.
 // Use this for complex types where it's hard to write a custom lift/lower.
-private protocol ViaFfiUsingByteBuffer: Serializable {}
+fileprivate protocol ViaFfiUsingByteBuffer: Serializable {}
 
-private extension ViaFfiUsingByteBuffer {
-    typealias FfiType = RustBuffer
+extension ViaFfiUsingByteBuffer {
+    fileprivate typealias FfiType = RustBuffer
 
-    static func lift(_ buf: RustBuffer) throws -> Self {
-        let reader = Reader(data: Data(rustBuffer: buf))
-        let value = try Self.read(from: reader)
-        if reader.hasRemaining() {
-            throw UniffiInternalError.incompleteData
-        }
-        buf.deallocate()
-        return value
+    fileprivate static func lift(_ buf: RustBuffer) throws -> Self {
+      let reader = Reader(data: Data(rustBuffer: buf))
+      let value = try Self.read(from: reader)
+      if reader.hasRemaining() {
+          throw UniffiInternalError.incompleteData
+      }
+      buf.deallocate()
+      return value
     }
 
-    func lower() -> RustBuffer {
-        let writer = Writer()
-        write(into: writer)
-        return RustBuffer(bytes: writer.bytes)
+    fileprivate func lower() -> RustBuffer {
+      let writer = Writer()
+      self.write(into: writer)
+      return RustBuffer(bytes: writer.bytes)
     }
 }
 
@@ -218,19 +218,21 @@ extension Optional: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Wrapped: S
     }
 }
 
+
+
 extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Serializable {
     fileprivate static func read(from buf: Reader) throws -> Self {
         let len: Int32 = try buf.readInt()
         var seq = [Element]()
         seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
+        for _ in 0..<len {
             seq.append(try Element.read(from: buf))
         }
         return seq
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(count)
+        let len = Int32(self.count)
         buf.writeInt(len)
         for item in self {
             item.write(into: buf)
@@ -238,25 +240,36 @@ extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Seri
     }
 }
 
+
+
+
+
+
+
+
 extension Int64: Primitive, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> Int64 {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 }
+
+
+
+
 
 extension Bool: ViaFfi {
     fileprivate typealias FfiType = Int8
 
     fileprivate static func read(from buf: Reader) throws -> Bool {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 
     fileprivate static func lift(_ v: Int8) throws -> Bool {
@@ -267,6 +280,10 @@ extension Bool: ViaFfi {
         return self ? 1 : 0
     }
 }
+
+
+
+
 
 extension String: ViaFfi {
     fileprivate typealias FfiType = RustBuffer
@@ -283,7 +300,7 @@ extension String: ViaFfi {
     }
 
     fileprivate func lower() -> FfiType {
-        return utf8CString.withUnsafeBufferPointer { ptr in
+        return self.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
                 // The swift string gives us a trailing null byte, we don't want it.
@@ -300,17 +317,83 @@ extension String: ViaFfi {
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(utf8.count)
+        let len = Int32(self.utf8.count)
         buf.writeInt(len)
-        buf.writeBytes(utf8)
+        buf.writeBytes(self.utf8)
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Public interface members begin here.
 
 // An error type for FFI errors. These errors occur at the UniFFI level, not
 // the library level.
-private enum UniffiInternalError: LocalizedError {
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -334,15 +417,15 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_PANIC: Int8 = 2
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_PANIC: Int8 = 2
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -351,95 +434,110 @@ private extension RustCallStatus {
     }
 }
 
+
+
 public enum AutofillError {
+
+    
+    
     // Simple error enums only carry a message
     case OpenDatabaseError(message: String)
-
+    
     // Simple error enums only carry a message
     case SqlError(message: String)
-
+    
     // Simple error enums only carry a message
     case IoError(message: String)
-
+    
     // Simple error enums only carry a message
     case InterruptedError(message: String)
-
+    
     // Simple error enums only carry a message
     case IllegalDatabasePath(message: String)
-
+    
     // Simple error enums only carry a message
     case Utf8Error(message: String)
-
+    
     // Simple error enums only carry a message
     case JsonError(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidSyncPayload(message: String)
-
+    
     // Simple error enums only carry a message
     case MissingEncryptionKey(message: String)
-
+    
     // Simple error enums only carry a message
     case CryptoError(message: String)
-
+    
     // Simple error enums only carry a message
     case NoSuchRecord(message: String)
+    
 }
 
 extension AutofillError: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> AutofillError {
         let variant: Int32 = try buf.readInt()
         switch variant {
+
+        
+
+        
         case 1: return .OpenDatabaseError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 2: return .SqlError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 3: return .IoError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 4: return .InterruptedError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 5: return .IllegalDatabasePath(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 6: return .Utf8Error(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 7: return .JsonError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 8: return .InvalidSyncPayload(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 9: return .MissingEncryptionKey(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 10: return .CryptoError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 11: return .NoSuchRecord(
-                message: try String.read(from: buf)
-            )
+            message: try String.read(from: buf)
+        )
+        
 
-        default: throw UniffiInternalError.unexpectedEnumCase
+         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     fileprivate func write(into buf: Writer) {
         switch self {
+
+        
+
+        
         case let .OpenDatabaseError(message):
             buf.writeInt(Int32(1))
             message.write(into: buf)
@@ -477,9 +575,11 @@ extension AutofillError: ViaFfiUsingByteBuffer, ViaFfi {
     }
 }
 
+
 extension AutofillError: Equatable, Hashable {}
 
-extension AutofillError: Error {}
+extension AutofillError: Error { }
+
 
 private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: {
@@ -488,36 +588,35 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
     })
 }
 
-private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
-    try makeRustCall(callback, errorHandler: { try E.lift($0) })
+private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_ errorClass: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
+    try makeRustCall(callback, errorHandler: { return try E.lift($0) })
 }
 
 private func makeRustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T, errorHandler: (RustBuffer) throws -> Error) throws -> T {
-    var callStatus = RustCallStatus()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return returnedVal
+        case CALL_SUCCESS:
+            return returnedVal
 
-    case CALL_ERROR:
-        throw try errorHandler(callStatus.errorBuf)
+        case CALL_ERROR:
+            throw try errorHandler(callStatus.errorBuf)
 
-    case CALL_PANIC:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_PANIC:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
-
 public struct UpdatableCreditCardFields {
     public var ccName: String
     public var ccNumberEnc: String
@@ -528,7 +627,7 @@ public struct UpdatableCreditCardFields {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(ccName: String, ccNumberEnc: String, ccNumberLast4: String, ccExpMonth: Int64, ccExpYear: Int64, ccType: String) {
+    public init(ccName: String, ccNumberEnc: String, ccNumberLast4: String, ccExpMonth: Int64, ccExpYear: Int64, ccType: String ) {
         self.ccName = ccName
         self.ccNumberEnc = ccNumberEnc
         self.ccNumberLast4 = ccNumberLast4
@@ -538,8 +637,9 @@ public struct UpdatableCreditCardFields {
     }
 }
 
+
 extension UpdatableCreditCardFields: Equatable, Hashable {
-    public static func == (lhs: UpdatableCreditCardFields, rhs: UpdatableCreditCardFields) -> Bool {
+    public static func ==(lhs: UpdatableCreditCardFields, rhs: UpdatableCreditCardFields) -> Bool {
         if lhs.ccName != rhs.ccName {
             return false
         }
@@ -571,7 +671,8 @@ extension UpdatableCreditCardFields: Equatable, Hashable {
     }
 }
 
-private extension UpdatableCreditCardFields {
+
+fileprivate extension UpdatableCreditCardFields {
     static func read(from buf: Reader) throws -> UpdatableCreditCardFields {
         return try UpdatableCreditCardFields(
             ccName: String.read(from: buf),
@@ -610,7 +711,7 @@ public struct CreditCard {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(guid: String, ccName: String, ccNumberEnc: String, ccNumberLast4: String, ccExpMonth: Int64, ccExpYear: Int64, ccType: String, timeCreated: Int64, timeLastUsed: Int64?, timeLastModified: Int64, timesUsed: Int64) {
+    public init(guid: String, ccName: String, ccNumberEnc: String, ccNumberLast4: String, ccExpMonth: Int64, ccExpYear: Int64, ccType: String, timeCreated: Int64, timeLastUsed: Int64?, timeLastModified: Int64, timesUsed: Int64 ) {
         self.guid = guid
         self.ccName = ccName
         self.ccNumberEnc = ccNumberEnc
@@ -625,8 +726,9 @@ public struct CreditCard {
     }
 }
 
+
 extension CreditCard: Equatable, Hashable {
-    public static func == (lhs: CreditCard, rhs: CreditCard) -> Bool {
+    public static func ==(lhs: CreditCard, rhs: CreditCard) -> Bool {
         if lhs.guid != rhs.guid {
             return false
         }
@@ -678,7 +780,8 @@ extension CreditCard: Equatable, Hashable {
     }
 }
 
-private extension CreditCard {
+
+fileprivate extension CreditCard {
     static func read(from buf: Reader) throws -> CreditCard {
         return try CreditCard(
             guid: String.read(from: buf),
@@ -728,7 +831,7 @@ public struct UpdatableAddressFields {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(givenName: String, additionalName: String, familyName: String, organization: String, streetAddress: String, addressLevel3: String, addressLevel2: String, addressLevel1: String, postalCode: String, country: String, tel: String, email: String) {
+    public init(givenName: String, additionalName: String, familyName: String, organization: String, streetAddress: String, addressLevel3: String, addressLevel2: String, addressLevel1: String, postalCode: String, country: String, tel: String, email: String ) {
         self.givenName = givenName
         self.additionalName = additionalName
         self.familyName = familyName
@@ -744,8 +847,9 @@ public struct UpdatableAddressFields {
     }
 }
 
+
 extension UpdatableAddressFields: Equatable, Hashable {
-    public static func == (lhs: UpdatableAddressFields, rhs: UpdatableAddressFields) -> Bool {
+    public static func ==(lhs: UpdatableAddressFields, rhs: UpdatableAddressFields) -> Bool {
         if lhs.givenName != rhs.givenName {
             return false
         }
@@ -801,7 +905,8 @@ extension UpdatableAddressFields: Equatable, Hashable {
     }
 }
 
-private extension UpdatableAddressFields {
+
+fileprivate extension UpdatableAddressFields {
     static func read(from buf: Reader) throws -> UpdatableAddressFields {
         return try UpdatableAddressFields(
             givenName: String.read(from: buf),
@@ -858,7 +963,7 @@ public struct Address {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(guid: String, givenName: String, additionalName: String, familyName: String, organization: String, streetAddress: String, addressLevel3: String, addressLevel2: String, addressLevel1: String, postalCode: String, country: String, tel: String, email: String, timeCreated: Int64, timeLastUsed: Int64?, timeLastModified: Int64, timesUsed: Int64) {
+    public init(guid: String, givenName: String, additionalName: String, familyName: String, organization: String, streetAddress: String, addressLevel3: String, addressLevel2: String, addressLevel1: String, postalCode: String, country: String, tel: String, email: String, timeCreated: Int64, timeLastUsed: Int64?, timeLastModified: Int64, timesUsed: Int64 ) {
         self.guid = guid
         self.givenName = givenName
         self.additionalName = additionalName
@@ -879,8 +984,9 @@ public struct Address {
     }
 }
 
+
 extension Address: Equatable, Hashable {
-    public static func == (lhs: Address, rhs: Address) -> Bool {
+    public static func ==(lhs: Address, rhs: Address) -> Bool {
         if lhs.guid != rhs.guid {
             return false
         }
@@ -956,7 +1062,8 @@ extension Address: Equatable, Hashable {
     }
 }
 
-private extension Address {
+
+fileprivate extension Address {
     static func read(from buf: Reader) throws -> Address {
         return try Address(
             guid: String.read(from: buf),
@@ -1002,48 +1109,69 @@ private extension Address {
 
 extension Address: ViaFfiUsingByteBuffer, ViaFfi {}
 
+
+
+
+
 public func createKey() throws -> String {
     let _retval = try
-
-        rustCallWithError(AutofillError.self) {
-            autofill_4174_create_key($0)
-        }
+    
+    
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_create_key( $0)
+}
     return try String.lift(_retval)
 }
 
-public func encryptString(key: String, cleartext: String) throws -> String {
+
+
+
+public func encryptString(key: String, cleartext: String ) throws -> String {
     let _retval = try
-
-        rustCallWithError(AutofillError.self) {
-            autofill_4174_encrypt_string(key.lower(), cleartext.lower(), $0)
-        }
+    
+    
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_encrypt_string(key.lower(), cleartext.lower() , $0)
+}
     return try String.lift(_retval)
 }
 
-public func decryptString(key: String, ciphertext: String) throws -> String {
+
+
+
+public func decryptString(key: String, ciphertext: String ) throws -> String {
     let _retval = try
-
-        rustCallWithError(AutofillError.self) {
-            autofill_4174_decrypt_string(key.lower(), ciphertext.lower(), $0)
-        }
+    
+    
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_decrypt_string(key.lower(), ciphertext.lower() , $0)
+}
     return try String.lift(_retval)
 }
+
+
+
+
 
 public protocol StoreProtocol {
-    func addCreditCard(cc: UpdatableCreditCardFields) throws -> CreditCard
-    func getCreditCard(guid: String) throws -> CreditCard
+    func addCreditCard(cc: UpdatableCreditCardFields ) throws -> CreditCard
+    func getCreditCard(guid: String ) throws -> CreditCard
     func getAllCreditCards() throws -> [CreditCard]
-    func updateCreditCard(guid: String, cc: UpdatableCreditCardFields) throws
-    func deleteCreditCard(guid: String) throws -> Bool
-    func touchCreditCard(guid: String) throws
-    func addAddress(a: UpdatableAddressFields) throws -> Address
-    func getAddress(guid: String) throws -> Address
+    func updateCreditCard(guid: String, cc: UpdatableCreditCardFields ) throws
+    func deleteCreditCard(guid: String ) throws -> Bool
+    func touchCreditCard(guid: String ) throws
+    func addAddress(a: UpdatableAddressFields ) throws -> Address
+    func getAddress(guid: String ) throws -> Address
     func getAllAddresses() throws -> [Address]
-    func updateAddress(guid: String, a: UpdatableAddressFields) throws
-    func deleteAddress(guid: String) throws -> Bool
-    func touchAddress(guid: String) throws
+    func updateAddress(guid: String, a: UpdatableAddressFields ) throws
+    func deleteAddress(guid: String ) throws -> Bool
+    func touchAddress(guid: String ) throws
     func scrubEncryptedData() throws
-    func registerWithSyncManager()
+    func registerWithSyncManager() 
+    
 }
 
 public class Store: StoreProtocol {
@@ -1055,152 +1183,173 @@ public class Store: StoreProtocol {
     required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
         self.pointer = pointer
     }
-
-    public convenience init(dbpath: String) throws {
+    public convenience init(dbpath: String ) throws {
         self.init(unsafeFromRawPointer: try
-
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_new(dbpath.lower(), $0)
-            })
+    
+    
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_new(dbpath.lower() , $0)
+})
     }
 
     deinit {
         try! rustCall { ffi_autofill_4174_Store_object_free(pointer, $0) }
     }
 
-    public func addCreditCard(cc: UpdatableCreditCardFields) throws -> CreditCard {
+    
+
+    
+    public func addCreditCard(cc: UpdatableCreditCardFields ) throws -> CreditCard {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_add_credit_card(self.pointer, cc.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_add_credit_card(self.pointer, cc.lower() , $0
+    )
+}
         return try CreditCard.lift(_retval)
     }
-
-    public func getCreditCard(guid: String) throws -> CreditCard {
+    public func getCreditCard(guid: String ) throws -> CreditCard {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_get_credit_card(self.pointer, guid.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_get_credit_card(self.pointer, guid.lower() , $0
+    )
+}
         return try CreditCard.lift(_retval)
     }
-
     public func getAllCreditCards() throws -> [CreditCard] {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_get_all_credit_cards(self.pointer, $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_get_all_credit_cards(self.pointer,  $0
+    )
+}
         return try [CreditCard].lift(_retval)
     }
-
-    public func updateCreditCard(guid: String, cc: UpdatableCreditCardFields) throws {
+    public func updateCreditCard(guid: String, cc: UpdatableCreditCardFields ) throws {
         try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_update_credit_card(self.pointer, guid.lower(), cc.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_update_credit_card(self.pointer, guid.lower(), cc.lower() , $0
+    )
+}
     }
-
-    public func deleteCreditCard(guid: String) throws -> Bool {
+    public func deleteCreditCard(guid: String ) throws -> Bool {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_delete_credit_card(self.pointer, guid.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_delete_credit_card(self.pointer, guid.lower() , $0
+    )
+}
         return try Bool.lift(_retval)
     }
-
-    public func touchCreditCard(guid: String) throws {
+    public func touchCreditCard(guid: String ) throws {
         try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_touch_credit_card(self.pointer, guid.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_touch_credit_card(self.pointer, guid.lower() , $0
+    )
+}
     }
-
-    public func addAddress(a: UpdatableAddressFields) throws -> Address {
+    public func addAddress(a: UpdatableAddressFields ) throws -> Address {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_add_address(self.pointer, a.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_add_address(self.pointer, a.lower() , $0
+    )
+}
         return try Address.lift(_retval)
     }
-
-    public func getAddress(guid: String) throws -> Address {
+    public func getAddress(guid: String ) throws -> Address {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_get_address(self.pointer, guid.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_get_address(self.pointer, guid.lower() , $0
+    )
+}
         return try Address.lift(_retval)
     }
-
     public func getAllAddresses() throws -> [Address] {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_get_all_addresses(self.pointer, $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_get_all_addresses(self.pointer,  $0
+    )
+}
         return try [Address].lift(_retval)
     }
-
-    public func updateAddress(guid: String, a: UpdatableAddressFields) throws {
+    public func updateAddress(guid: String, a: UpdatableAddressFields ) throws {
         try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_update_address(self.pointer, guid.lower(), a.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_update_address(self.pointer, guid.lower(), a.lower() , $0
+    )
+}
     }
-
-    public func deleteAddress(guid: String) throws -> Bool {
+    public func deleteAddress(guid: String ) throws -> Bool {
         let _retval = try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_delete_address(self.pointer, guid.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_delete_address(self.pointer, guid.lower() , $0
+    )
+}
         return try Bool.lift(_retval)
     }
-
-    public func touchAddress(guid: String) throws {
+    public func touchAddress(guid: String ) throws {
         try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_touch_address(self.pointer, guid.lower(), $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_touch_address(self.pointer, guid.lower() , $0
+    )
+}
     }
-
     public func scrubEncryptedData() throws {
         try
-            rustCallWithError(AutofillError.self) {
-                autofill_4174_Store_scrub_encrypted_data(self.pointer, $0)
-            }
+    rustCallWithError(AutofillError.self) {
+    
+    autofill_4174_Store_scrub_encrypted_data(self.pointer,  $0
+    )
+}
     }
-
-    public func registerWithSyncManager() {
+    public func registerWithSyncManager()  {
         try!
-            rustCall {
-                autofill_4174_Store_register_with_sync_manager(self.pointer, $0)
-            }
+    rustCall() {
+    
+    autofill_4174_Store_register_with_sync_manager(self.pointer,  $0
+    )
+}
     }
+    
 }
 
-private extension Store {
-    typealias FfiType = UnsafeMutableRawPointer
 
-    static func read(from buf: Reader) throws -> Self {
+fileprivate extension Store {
+    fileprivate typealias FfiType = UnsafeMutableRawPointer
+
+    fileprivate static func read(from buf: Reader) throws -> Self {
         let v: UInt64 = try buf.readInt()
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
         let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if ptr == nil {
+        if (ptr == nil) {
             throw UniffiInternalError.unexpectedNullPointer
         }
-        return try lift(ptr!)
+        return try self.lift(ptr!)
     }
 
-    func write(into buf: Writer) {
+    fileprivate func write(into buf: Writer) {
         // This fiddling is because `Int` is the thing that's the same size as a pointer.
         // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: lower()))))
+        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: self.lower()))))
     }
 
-    static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
+    fileprivate static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
         return Self(unsafeFromRawPointer: pointer)
     }
 
-    func lower() -> UnsafeMutableRawPointer {
-        return pointer
+    fileprivate func lower() -> UnsafeMutableRawPointer {
+        return self.pointer
     }
 }
 
@@ -1208,4 +1357,6 @@ private extension Store {
 // """
 // 'private' modifier cannot be used with extensions that declare protocol conformances
 // """
-extension Store: ViaFfi, Serializable {}
+extension Store : ViaFfi, Serializable {}
+
+

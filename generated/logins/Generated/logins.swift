@@ -7,10 +7,10 @@ import Foundation
 // might be in a separate module, or it might be compiled inline into
 // this module. This is a bit of light hackery to work with both.
 #if canImport(MozillaRustComponents)
-    import MozillaRustComponents
+import MozillaRustComponents
 #endif
 
-private extension RustBuffer {
+fileprivate extension RustBuffer {
     // Allocate a new buffer, copying the contents of a `UInt8` array.
     init(bytes: [UInt8]) {
         let rbuf = bytes.withUnsafeBufferPointer { ptr in
@@ -26,12 +26,11 @@ private extension RustBuffer {
     }
 }
 
-private extension ForeignBytes {
+fileprivate extension ForeignBytes {
     init(bufferPointer: UnsafeBufferPointer<UInt8>) {
         self.init(len: Int32(bufferPointer.count), data: bufferPointer.baseAddress)
     }
 }
-
 // For every type used in the interface, we provide helper methods for conveniently
 // lifting and lowering that type from C-compatible data, and for reading and writing
 // values of that type in a buffer.
@@ -39,7 +38,7 @@ private extension ForeignBytes {
 // Helper classes/extensions that don't change.
 // Someday, this will be in a libray of its own.
 
-private extension Data {
+fileprivate extension Data {
     init(rustBuffer: RustBuffer) {
         // TODO: This copies the buffer. Can we read directly from a
         // Rust buffer?
@@ -48,20 +47,20 @@ private extension Data {
 }
 
 // A helper class to read values out of a byte buffer.
-private class Reader {
+fileprivate class Reader {
     let data: Data
     var offset: Data.Index
 
     init(data: Data) {
         self.data = data
-        offset = 0
+        self.offset = 0
     }
 
     // Reads an integer at the current offset, in big-endian order, and advances
     // the offset on success. Throws if reading the integer would move the
     // offset past the end of the buffer.
     func readInt<T: FixedWidthInteger>() throws -> T {
-        let range = offset ..< offset + MemoryLayout<T>.size
+        let range = offset..<offset + MemoryLayout<T>.size
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
@@ -71,22 +70,22 @@ private class Reader {
             return value as! T
         }
         var value: T = 0
-        _ = withUnsafeMutableBytes(of: &value) { data.copyBytes(to: $0, from: range) }
+        let _ = withUnsafeMutableBytes(of: &value, { data.copyBytes(to: $0, from: range)})
         offset = range.upperBound
         return value.bigEndian
     }
 
     // Reads an arbitrary number of bytes, to be used to read
     // raw bytes, this is useful when lifting strings
-    func readBytes(count: Int) throws -> [UInt8] {
-        let range = offset ..< (offset + count)
+    func readBytes(count: Int) throws -> Array<UInt8> {
+        let range = offset..<(offset+count)
         guard data.count >= range.upperBound else {
             throw UniffiInternalError.bufferOverflow
         }
         var value = [UInt8](repeating: 0, count: count)
-        value.withUnsafeMutableBufferPointer { buffer in
+        value.withUnsafeMutableBufferPointer({ buffer in
             data.copyBytes(to: buffer, from: range)
-        }
+        })
         offset = range.upperBound
         return value
     }
@@ -111,13 +110,13 @@ private class Reader {
 }
 
 // A helper class to write values into a byte buffer.
-private class Writer {
+fileprivate class Writer {
     var bytes: [UInt8]
     var offset: Array<UInt8>.Index
 
     init() {
-        bytes = []
-        offset = 0
+        self.bytes = []
+        self.offset = 0
     }
 
     func writeBytes<S>(_ byteArr: S) where S: Sequence, S.Element == UInt8 {
@@ -144,56 +143,57 @@ private class Writer {
     }
 }
 
+
 // Types conforming to `Serializable` can be read and written in a bytebuffer.
-private protocol Serializable {
+fileprivate protocol Serializable {
     func write(into: Writer)
     static func read(from: Reader) throws -> Self
 }
 
 // Types confirming to `ViaFfi` can be transferred back-and-for over the FFI.
 // This is analogous to the Rust trait of the same name.
-private protocol ViaFfi: Serializable {
+fileprivate protocol ViaFfi: Serializable {
     associatedtype FfiType
     static func lift(_ v: FfiType) throws -> Self
     func lower() -> FfiType
 }
 
 // Types conforming to `Primitive` pass themselves directly over the FFI.
-private protocol Primitive {}
+fileprivate protocol Primitive {}
 
-private extension Primitive {
-    typealias FfiType = Self
+extension Primitive {
+    fileprivate typealias FfiType = Self
 
-    static func lift(_ v: Self) throws -> Self {
+    fileprivate static func lift(_ v: Self) throws -> Self {
         return v
     }
 
-    func lower() -> Self {
+    fileprivate func lower() -> Self {
         return self
     }
 }
 
 // Types conforming to `ViaFfiUsingByteBuffer` lift and lower into a bytebuffer.
 // Use this for complex types where it's hard to write a custom lift/lower.
-private protocol ViaFfiUsingByteBuffer: Serializable {}
+fileprivate protocol ViaFfiUsingByteBuffer: Serializable {}
 
-private extension ViaFfiUsingByteBuffer {
-    typealias FfiType = RustBuffer
+extension ViaFfiUsingByteBuffer {
+    fileprivate typealias FfiType = RustBuffer
 
-    static func lift(_ buf: RustBuffer) throws -> Self {
-        let reader = Reader(data: Data(rustBuffer: buf))
-        let value = try Self.read(from: reader)
-        if reader.hasRemaining() {
-            throw UniffiInternalError.incompleteData
-        }
-        buf.deallocate()
-        return value
+    fileprivate static func lift(_ buf: RustBuffer) throws -> Self {
+      let reader = Reader(data: Data(rustBuffer: buf))
+      let value = try Self.read(from: reader)
+      if reader.hasRemaining() {
+          throw UniffiInternalError.incompleteData
+      }
+      buf.deallocate()
+      return value
     }
 
-    func lower() -> RustBuffer {
-        let writer = Writer()
-        write(into: writer)
-        return RustBuffer(bytes: writer.bytes)
+    fileprivate func lower() -> RustBuffer {
+      let writer = Writer()
+      self.write(into: writer)
+      return RustBuffer(bytes: writer.bytes)
     }
 }
 
@@ -218,19 +218,21 @@ extension Optional: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Wrapped: S
     }
 }
 
+
+
 extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Serializable {
     fileprivate static func read(from buf: Reader) throws -> Self {
         let len: Int32 = try buf.readInt()
         var seq = [Element]()
         seq.reserveCapacity(Int(len))
-        for _ in 0 ..< len {
+        for _ in 0..<len {
             seq.append(try Element.read(from: buf))
         }
         return seq
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(count)
+        let len = Int32(self.count)
         buf.writeInt(len)
         for item in self {
             item.write(into: buf)
@@ -238,25 +240,36 @@ extension Array: ViaFfiUsingByteBuffer, ViaFfi, Serializable where Element: Seri
     }
 }
 
+
+
+
+
+
+
+
 extension Int64: Primitive, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> Int64 {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 }
+
+
+
+
 
 extension Bool: ViaFfi {
     fileprivate typealias FfiType = Int8
 
     fileprivate static func read(from buf: Reader) throws -> Bool {
-        return try lift(buf.readInt())
+        return try self.lift(buf.readInt())
     }
 
     fileprivate func write(into buf: Writer) {
-        buf.writeInt(lower())
+        buf.writeInt(self.lower())
     }
 
     fileprivate static func lift(_ v: Int8) throws -> Bool {
@@ -267,6 +280,10 @@ extension Bool: ViaFfi {
         return self ? 1 : 0
     }
 }
+
+
+
+
 
 extension String: ViaFfi {
     fileprivate typealias FfiType = RustBuffer
@@ -283,7 +300,7 @@ extension String: ViaFfi {
     }
 
     fileprivate func lower() -> FfiType {
-        return utf8CString.withUnsafeBufferPointer { ptr in
+        return self.utf8CString.withUnsafeBufferPointer { ptr in
             // The swift string gives us int8_t, we want uint8_t.
             ptr.withMemoryRebound(to: UInt8.self) { ptr in
                 // The swift string gives us a trailing null byte, we don't want it.
@@ -300,17 +317,62 @@ extension String: ViaFfi {
     }
 
     fileprivate func write(into buf: Writer) {
-        let len = Int32(utf8.count)
+        let len = Int32(self.utf8.count)
         buf.writeInt(len)
-        buf.writeBytes(utf8)
+        buf.writeBytes(self.utf8)
     }
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // Public interface members begin here.
 
 // An error type for FFI errors. These errors occur at the UniFFI level, not
 // the library level.
-private enum UniffiInternalError: LocalizedError {
+fileprivate enum UniffiInternalError: LocalizedError {
     case bufferOverflow
     case incompleteData
     case unexpectedOptionalTag
@@ -334,15 +396,15 @@ private enum UniffiInternalError: LocalizedError {
     }
 }
 
-private let CALL_SUCCESS: Int8 = 0
-private let CALL_ERROR: Int8 = 1
-private let CALL_PANIC: Int8 = 2
+fileprivate let CALL_SUCCESS: Int8 = 0
+fileprivate let CALL_ERROR: Int8 = 1
+fileprivate let CALL_PANIC: Int8 = 2
 
-private extension RustCallStatus {
+fileprivate extension RustCallStatus {
     init() {
         self.init(
             code: CALL_SUCCESS,
-            errorBuf: RustBuffer(
+            errorBuf: RustBuffer.init(
                 capacity: 0,
                 len: 0,
                 data: nil
@@ -351,81 +413,96 @@ private extension RustCallStatus {
     }
 }
 
+
+
 public enum LoginsStorageError {
+
+    
+    
     // Simple error enums only carry a message
     case UnexpectedLoginsStorageError(message: String)
-
+    
     // Simple error enums only carry a message
     case SyncAuthInvalid(message: String)
-
+    
     // Simple error enums only carry a message
     case MismatchedLock(message: String)
-
+    
     // Simple error enums only carry a message
     case NoSuchRecord(message: String)
-
+    
     // Simple error enums only carry a message
     case IdCollision(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidRecord(message: String)
-
+    
     // Simple error enums only carry a message
     case InvalidKey(message: String)
-
+    
     // Simple error enums only carry a message
     case RequestFailed(message: String)
-
+    
     // Simple error enums only carry a message
     case Interrupted(message: String)
+    
 }
 
 extension LoginsStorageError: ViaFfiUsingByteBuffer, ViaFfi {
     fileprivate static func read(from buf: Reader) throws -> LoginsStorageError {
         let variant: Int32 = try buf.readInt()
         switch variant {
+
+        
+
+        
         case 1: return .UnexpectedLoginsStorageError(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 2: return .SyncAuthInvalid(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 3: return .MismatchedLock(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 4: return .NoSuchRecord(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 5: return .IdCollision(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 6: return .InvalidRecord(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 7: return .InvalidKey(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 8: return .RequestFailed(
-                message: try String.read(from: buf)
-            )
-
+            message: try String.read(from: buf)
+        )
+        
         case 9: return .Interrupted(
-                message: try String.read(from: buf)
-            )
+            message: try String.read(from: buf)
+        )
+        
 
-        default: throw UniffiInternalError.unexpectedEnumCase
+         default: throw UniffiInternalError.unexpectedEnumCase
         }
     }
 
     fileprivate func write(into buf: Writer) {
         switch self {
+
+        
+
+        
         case let .UnexpectedLoginsStorageError(message):
             buf.writeInt(Int32(1))
             message.write(into: buf)
@@ -457,9 +534,11 @@ extension LoginsStorageError: ViaFfiUsingByteBuffer, ViaFfi {
     }
 }
 
+
 extension LoginsStorageError: Equatable, Hashable {}
 
-extension LoginsStorageError: Error {}
+extension LoginsStorageError: Error { }
+
 
 private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
     try makeRustCall(callback, errorHandler: {
@@ -468,36 +547,35 @@ private func rustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T
     })
 }
 
-private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
-    try makeRustCall(callback, errorHandler: { try E.lift($0) })
+private func rustCallWithError<T, E: ViaFfiUsingByteBuffer & Error>(_ errorClass: E.Type, _ callback: (UnsafeMutablePointer<RustCallStatus>) -> T) throws -> T {
+    try makeRustCall(callback, errorHandler: { return try E.lift($0) })
 }
 
 private func makeRustCall<T>(_ callback: (UnsafeMutablePointer<RustCallStatus>) -> T, errorHandler: (RustBuffer) throws -> Error) throws -> T {
-    var callStatus = RustCallStatus()
+    var callStatus = RustCallStatus.init()
     let returnedVal = callback(&callStatus)
     switch callStatus.code {
-    case CALL_SUCCESS:
-        return returnedVal
+        case CALL_SUCCESS:
+            return returnedVal
 
-    case CALL_ERROR:
-        throw try errorHandler(callStatus.errorBuf)
+        case CALL_ERROR:
+            throw try errorHandler(callStatus.errorBuf)
 
-    case CALL_PANIC:
-        // When the rust code sees a panic, it tries to construct a RustBuffer
-        // with the message.  But if that code panics, then it just sends back
-        // an empty buffer.
-        if callStatus.errorBuf.len > 0 {
-            throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
-        } else {
-            callStatus.errorBuf.deallocate()
-            throw UniffiInternalError.rustPanic("Rust panic")
-        }
+        case CALL_PANIC:
+            // When the rust code sees a panic, it tries to construct a RustBuffer
+            // with the message.  But if that code panics, then it just sends back
+            // an empty buffer.
+            if callStatus.errorBuf.len > 0 {
+                throw UniffiInternalError.rustPanic(try String.lift(callStatus.errorBuf))
+            } else {
+                callStatus.errorBuf.deallocate()
+                throw UniffiInternalError.rustPanic("Rust panic")
+            }
 
-    default:
-        throw UniffiInternalError.unexpectedRustCallStatusCode
+        default:
+            throw UniffiInternalError.unexpectedRustCallStatusCode
     }
 }
-
 public struct Login {
     public var id: String
     public var hostname: String
@@ -514,7 +592,7 @@ public struct Login {
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
-    public init(id: String, hostname: String, password: String, username: String, httpRealm: String?, formSubmitUrl: String?, usernameField: String, passwordField: String, timesUsed: Int64, timeCreated: Int64, timeLastUsed: Int64, timePasswordChanged: Int64) {
+    public init(id: String, hostname: String, password: String, username: String, httpRealm: String?, formSubmitUrl: String?, usernameField: String, passwordField: String, timesUsed: Int64, timeCreated: Int64, timeLastUsed: Int64, timePasswordChanged: Int64 ) {
         self.id = id
         self.hostname = hostname
         self.password = password
@@ -530,8 +608,9 @@ public struct Login {
     }
 }
 
+
 extension Login: Equatable, Hashable {
-    public static func == (lhs: Login, rhs: Login) -> Bool {
+    public static func ==(lhs: Login, rhs: Login) -> Bool {
         if lhs.id != rhs.id {
             return false
         }
@@ -587,7 +666,8 @@ extension Login: Equatable, Hashable {
     }
 }
 
-private extension Login {
+
+fileprivate extension Login {
     static func read(from buf: Reader) throws -> Login {
         return try Login(
             id: String.read(from: buf),
@@ -623,41 +703,57 @@ private extension Login {
 
 extension Login: ViaFfiUsingByteBuffer, ViaFfi {}
 
-public func openAndGetSalt(path: String, encryptionKey: String) throws -> String {
-    let _retval = try
 
-        rustCallWithError(LoginsStorageError.self) {
-            logins_f90f_open_and_get_salt(path.lower(), encryptionKey.lower(), $0)
-        }
+
+
+
+public func openAndGetSalt(path: String, encryptionKey: String ) throws -> String {
+    let _retval = try
+    
+    
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_open_and_get_salt(path.lower(), encryptionKey.lower() , $0)
+}
     return try String.lift(_retval)
 }
 
-public func openAndMigrateToPlaintextHeader(path: String, encryptionKey: String, salt: String) throws {
-    try
 
-        rustCallWithError(LoginsStorageError.self) {
-            logins_f90f_open_and_migrate_to_plaintext_header(path.lower(), encryptionKey.lower(), salt.lower(), $0)
-        }
+
+
+public func openAndMigrateToPlaintextHeader(path: String, encryptionKey: String, salt: String ) throws {
+    try
+    
+    
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_open_and_migrate_to_plaintext_header(path.lower(), encryptionKey.lower(), salt.lower() , $0)
+}
 }
 
+
+
+
+
 public protocol LoginStoreProtocol {
-    func checkValidWithNoDupes(login: Login) throws
-    func add(login: Login) throws -> String
-    func delete(id: String) throws -> Bool
+    func checkValidWithNoDupes(login: Login ) throws
+    func add(login: Login ) throws -> String
+    func delete(id: String ) throws -> Bool
     func wipe() throws
     func wipeLocal() throws
     func reset() throws
     func disableMemSecurity() throws
-    func rekeyDatabase(newEncryptionKey: String) throws
-    func touch(id: String) throws
+    func rekeyDatabase(newEncryptionKey: String ) throws
+    func touch(id: String ) throws
     func list() throws -> [Login]
-    func getByBaseDomain(baseDomain: String) throws -> [Login]
-    func potentialDupesIgnoringUsername(login: Login) throws -> [Login]
-    func get(id: String) throws -> Login?
-    func update(login: Login) throws
-    func importMultiple(login: [Login]) throws -> String
-    func registerWithSyncManager()
-    func sync(keyId: String, accessToken: String, syncKey: String, tokenserverUrl: String) throws -> String
+    func getByBaseDomain(baseDomain: String ) throws -> [Login]
+    func potentialDupesIgnoringUsername(login: Login ) throws -> [Login]
+    func get(id: String ) throws -> Login?
+    func update(login: Login ) throws
+    func importMultiple(login: [Login] ) throws -> String
+    func registerWithSyncManager() 
+    func sync(keyId: String, accessToken: String, syncKey: String, tokenserverUrl: String ) throws -> String
+    
 }
 
 public class LoginStore: LoginStoreProtocol {
@@ -669,181 +765,207 @@ public class LoginStore: LoginStoreProtocol {
     required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
         self.pointer = pointer
     }
-
-    public convenience init(path: String, encryptionKey: String) throws {
+    public convenience init(path: String, encryptionKey: String ) throws {
         self.init(unsafeFromRawPointer: try
-
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_new(path.lower(), encryptionKey.lower(), $0)
-            })
+    
+    
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_new(path.lower(), encryptionKey.lower() , $0)
+})
     }
 
     deinit {
         try! rustCall { ffi_logins_f90f_LoginStore_object_free(pointer, $0) }
     }
 
-    public static func newWithSalt(path: String, encryptionKey: String, salt: String) throws -> LoginStore {
+    
+    public static func newWithSalt(path: String, encryptionKey: String, salt: String ) throws -> LoginStore {
         return LoginStore(unsafeFromRawPointer: try
-
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_new_with_salt(path.lower(), encryptionKey.lower(), salt.lower(), $0)
-            })
+    
+    
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_new_with_salt(path.lower(), encryptionKey.lower(), salt.lower() , $0)
+})
     }
+    
 
-    public func checkValidWithNoDupes(login: Login) throws {
+    
+    public func checkValidWithNoDupes(login: Login ) throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_check_valid_with_no_dupes(self.pointer, login.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_check_valid_with_no_dupes(self.pointer, login.lower() , $0
+    )
+}
     }
-
-    public func add(login: Login) throws -> String {
+    public func add(login: Login ) throws -> String {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_add(self.pointer, login.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_add(self.pointer, login.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func delete(id: String) throws -> Bool {
+    public func delete(id: String ) throws -> Bool {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_delete(self.pointer, id.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_delete(self.pointer, id.lower() , $0
+    )
+}
         return try Bool.lift(_retval)
     }
-
     public func wipe() throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_wipe(self.pointer, $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_wipe(self.pointer,  $0
+    )
+}
     }
-
     public func wipeLocal() throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_wipe_local(self.pointer, $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_wipe_local(self.pointer,  $0
+    )
+}
     }
-
     public func reset() throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_reset(self.pointer, $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_reset(self.pointer,  $0
+    )
+}
     }
-
     public func disableMemSecurity() throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_disable_mem_security(self.pointer, $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_disable_mem_security(self.pointer,  $0
+    )
+}
     }
-
-    public func rekeyDatabase(newEncryptionKey: String) throws {
+    public func rekeyDatabase(newEncryptionKey: String ) throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_rekey_database(self.pointer, newEncryptionKey.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_rekey_database(self.pointer, newEncryptionKey.lower() , $0
+    )
+}
     }
-
-    public func touch(id: String) throws {
+    public func touch(id: String ) throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_touch(self.pointer, id.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_touch(self.pointer, id.lower() , $0
+    )
+}
     }
-
     public func list() throws -> [Login] {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_list(self.pointer, $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_list(self.pointer,  $0
+    )
+}
         return try [Login].lift(_retval)
     }
-
-    public func getByBaseDomain(baseDomain: String) throws -> [Login] {
+    public func getByBaseDomain(baseDomain: String ) throws -> [Login] {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_get_by_base_domain(self.pointer, baseDomain.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_get_by_base_domain(self.pointer, baseDomain.lower() , $0
+    )
+}
         return try [Login].lift(_retval)
     }
-
-    public func potentialDupesIgnoringUsername(login: Login) throws -> [Login] {
+    public func potentialDupesIgnoringUsername(login: Login ) throws -> [Login] {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_potential_dupes_ignoring_username(self.pointer, login.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_potential_dupes_ignoring_username(self.pointer, login.lower() , $0
+    )
+}
         return try [Login].lift(_retval)
     }
-
-    public func get(id: String) throws -> Login? {
+    public func get(id: String ) throws -> Login? {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_get(self.pointer, id.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_get(self.pointer, id.lower() , $0
+    )
+}
         return try Login?.lift(_retval)
     }
-
-    public func update(login: Login) throws {
+    public func update(login: Login ) throws {
         try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_update(self.pointer, login.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_update(self.pointer, login.lower() , $0
+    )
+}
     }
-
-    public func importMultiple(login: [Login]) throws -> String {
+    public func importMultiple(login: [Login] ) throws -> String {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_import_multiple(self.pointer, login.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_import_multiple(self.pointer, login.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
-
-    public func registerWithSyncManager() {
+    public func registerWithSyncManager()  {
         try!
-            rustCall {
-                logins_f90f_LoginStore_register_with_sync_manager(self.pointer, $0)
-            }
+    rustCall() {
+    
+    logins_f90f_LoginStore_register_with_sync_manager(self.pointer,  $0
+    )
+}
     }
-
-    public func sync(keyId: String, accessToken: String, syncKey: String, tokenserverUrl: String) throws -> String {
+    public func sync(keyId: String, accessToken: String, syncKey: String, tokenserverUrl: String ) throws -> String {
         let _retval = try
-            rustCallWithError(LoginsStorageError.self) {
-                logins_f90f_LoginStore_sync(self.pointer, keyId.lower(), accessToken.lower(), syncKey.lower(), tokenserverUrl.lower(), $0)
-            }
+    rustCallWithError(LoginsStorageError.self) {
+    
+    logins_f90f_LoginStore_sync(self.pointer, keyId.lower(), accessToken.lower(), syncKey.lower(), tokenserverUrl.lower() , $0
+    )
+}
         return try String.lift(_retval)
     }
+    
 }
 
-private extension LoginStore {
-    typealias FfiType = UnsafeMutableRawPointer
 
-    static func read(from buf: Reader) throws -> Self {
+fileprivate extension LoginStore {
+    fileprivate typealias FfiType = UnsafeMutableRawPointer
+
+    fileprivate static func read(from buf: Reader) throws -> Self {
         let v: UInt64 = try buf.readInt()
         // The Rust code won't compile if a pointer won't fit in a UInt64.
         // We have to go via `UInt` because that's the thing that's the size of a pointer.
         let ptr = UnsafeMutableRawPointer(bitPattern: UInt(truncatingIfNeeded: v))
-        if ptr == nil {
+        if (ptr == nil) {
             throw UniffiInternalError.unexpectedNullPointer
         }
-        return try lift(ptr!)
+        return try self.lift(ptr!)
     }
 
-    func write(into buf: Writer) {
+    fileprivate func write(into buf: Writer) {
         // This fiddling is because `Int` is the thing that's the same size as a pointer.
         // The Rust code won't compile if a pointer won't fit in a `UInt64`.
-        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: lower()))))
+        buf.writeInt(UInt64(bitPattern: Int64(Int(bitPattern: self.lower()))))
     }
 
-    static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
+    fileprivate static func lift(_ pointer: UnsafeMutableRawPointer) throws -> Self {
         return Self(unsafeFromRawPointer: pointer)
     }
 
-    func lower() -> UnsafeMutableRawPointer {
-        return pointer
+    fileprivate func lower() -> UnsafeMutableRawPointer {
+        return self.pointer
     }
 }
 
@@ -851,4 +973,6 @@ private extension LoginStore {
 // """
 // 'private' modifier cannot be used with extensions that declare protocol conformances
 // """
-extension LoginStore: ViaFfi, Serializable {}
+extension LoginStore : ViaFfi, Serializable {}
+
+
