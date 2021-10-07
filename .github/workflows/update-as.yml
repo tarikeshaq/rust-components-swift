@@ -64,11 +64,15 @@ jobs:
           python automation/update_package_swift.py
           git commit -am "Updates Package.swift with $AS_VERSION release"
           
-      - name: Install Rust to run the make_tag script
+      - name: Install Rust for the make_tag script
         if: env.ALREADY_CREATED == 'false'
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           source $HOME/.cargo/env
+      - name: Install swiftformat to format the uniffi generated bindings
+        uses: Cyberbeni/install-swift-tool@v2
+        with:
+          url: https://github.com/nicklockwood/SwiftFormat
       # We strip away the `v` in the AS Version and run the make_tag
       # script, which will generate all the code that needs to be generated
       # Note that the tag argument isn't useful here, since we will
