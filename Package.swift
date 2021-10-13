@@ -40,8 +40,8 @@ let package = Package(
             //
             // IMPORTANT: The checksum has to be on the line directly after the `url`
             // this is important for our release script so that all values are updated correctly
-            url: "https://116964-129966583-gh.circle-artifacts.com/0/dist/MozillaRustComponents.xcframework.zip",
-            checksum: "87c570f0f14055020263a38cf45726bee0b890a77a3359c76499756905ca30cc"
+            url: "https://github.com/mozilla/application-services/releases/download/v85.4.1/MozillaRustComponents.xcframework.zip",
+            checksum: "71691102a47cb594765c1879e9d1055761e565998f754bf3d34c81d43762dcb6"
 
             // For local testing, you can point at an (unzipped) XCFramework that's part of the repo.
             // Note that you have to actually check it in and make a tag for it to work correctly.
