@@ -19,21 +19,21 @@ let package = Package(
     ],
     targets: [
         /*
-        * A placeholder wrapper for our binaryTarget so that Xcode will ensure this is
-        * downloaded/built before trying to use it in the build process
-        * A bit hacky but necessary for now https://github.com/mozilla/application-services/issues/4422
-        */
+         * A placeholder wrapper for our binaryTarget so that Xcode will ensure this is
+         * downloaded/built before trying to use it in the build process
+         * A bit hacky but necessary for now https://github.com/mozilla/application-services/issues/4422
+         */
         .target(
             name: "MozillaRustComponentsWrapper",
             dependencies: [
-                .target(name: "MozillaRustComponents", condition: .when(platforms: [.iOS]))
+                .target(name: "MozillaRustComponents", condition: .when(platforms: [.iOS])),
             ],
             path: "MozillaRustComponentsWrapper"
         ),
         .target(
             name: "FocusRustComponentsWrapper",
             dependencies: [
-                .target(name: "FocusRustComponents", condition: .when(platforms: [.iOS]))
+                .target(name: "FocusRustComponents", condition: .when(platforms: [.iOS])),
             ],
             path: "FocusRustComponentsWrapper"
         ),
@@ -49,7 +49,7 @@ let package = Package(
             // For local testing, you can point at an (unzipped) XCFramework that's part of the repo.
             // Note that you have to actually check it in and make a tag for it to work correctly.
             //
-            //path: "./MozillaRustComponents.xcframework"
+            // path: "./MozillaRustComponents.xcframework"
         ),
         .binaryTarget(
             name: "FocusRustComponents",
@@ -63,7 +63,7 @@ let package = Package(
             // For local testing, you can point at an (unzipped) XCFramework that's part of the repo.
             // Note that you have to actually check it in and make a tag for it to work correctly.
             //
-            //path: "./FocusRustComponents.xcframework"
+            // path: "./FocusRustComponents.xcframework"
         ),
         .target(
             name: "MozillaAppServices",
