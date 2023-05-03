@@ -68,18 +68,12 @@ let package = Package(
         .target(
             name: "MozillaAppServices",
             dependencies: ["MozillaRustComponentsWrapper"],
-            path: "swift-source/all",
-            swiftSettings: [
-                .unsafeFlags(["-suppress-warnings"]),
-            ]
+            path: "swift-source/all"
         ),
         .target(
             name: "FocusAppServices",
             dependencies: ["FocusRustComponentsWrapper"],
-            path: "swift-source/focus",
-            swiftSettings: [
-                .unsafeFlags(["-suppress-warnings"]),
-            ]
+            path: "swift-source/focus"
         ),
     ]
 )
